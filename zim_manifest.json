@@ -1,4 +1,1391 @@
 {
-  "installed": {},
+  "installed": {
+    "devdocs_en_python": {
+      "path": "zim_files/devdocs_en_python_2026-02.zim",
+      "title": "Python Docs",
+      "size": "4.1 MB",
+      "installed_at": 1777148221.5349796
+    },
+    "devdocs_en_javascript": {
+      "path": "zim_files/devdocs_en_javascript_2026-04.zim",
+      "title": "JavaScript Docs",
+      "size": "2.6 MB",
+      "installed_at": 1777148223.7201972
+    },
+    "devdocs_en_typescript": {
+      "path": "zim_files/devdocs_en_typescript_2026-04.zim",
+      "title": "TypeScript Docs",
+      "size": "1.1 MB",
+      "installed_at": 1777148225.716821
+    },
+    "devdocs_en_go": {
+      "path": "zim_files/devdocs_en_go_2026-04.zim",
+      "title": "Go Docs",
+      "size": "1.6 MB",
+      "installed_at": 1777148227.5765991
+    },
+    "devdocs_en_rust": {
+      "path": "zim_files/devdocs_en_rust_2026-04.zim",
+      "title": "Rust Docs",
+      "size": "5.7 MB",
+      "installed_at": 1777148230.5183966
+    },
+    "devdocs_en_cpp": {
+      "path": "zim_files/devdocs_en_cpp_2026-04.zim",
+      "title": "C++ Docs",
+      "size": "6.9 MB",
+      "installed_at": 1777148231.945481
+    },
+    "devdocs_en_git": {
+      "path": "zim_files/devdocs_en_git_2026-04.zim",
+      "title": "Git Docs",
+      "size": "1.5 MB",
+      "installed_at": 1777148236.1060786
+    },
+    "devdocs_en_bash": {
+      "path": "zim_files/devdocs_en_bash_2026-04.zim",
+      "title": "Bash Docs",
+      "size": "545.0 KB",
+      "installed_at": 1777148237.0002599
+    },
+    "devdocs_en_docker": {
+      "path": "zim_files/devdocs_en_docker_2026-04.zim",
+      "title": "Docker Docs",
+      "size": "1.7 MB",
+      "installed_at": 1777148239.1944735
+    },
+    "devdocs_en_angular": {
+      "path": "zim_files/devdocs_en_angular_2026-02.zim",
+      "title": "Angular Docs",
+      "size": "2.1 MB",
+      "installed_at": 1777150046.7400324
+    },
+    "devdocs_en_angularjs": {
+      "path": "zim_files/devdocs_en_angularjs_2026-04.zim",
+      "title": "Angular.js Docs",
+      "size": "1.0 MB",
+      "installed_at": 1777150047.7246006
+    },
+    "devdocs_en_ansible": {
+      "path": "zim_files/devdocs_en_ansible_2026-04.zim",
+      "title": "Ansible Docs",
+      "size": "29.5 MB",
+      "installed_at": 1777150054.8820803
+    },
+    "devdocs_en_apache-http-server": {
+      "path": "zim_files/devdocs_en_apache-http-server_2026-04.zim",
+      "title": "Apache HTTP Server Docs",
+      "size": "1.3 MB",
+      "installed_at": 1777150056.705528
+    },
+    "devdocs_en_apache-pig": {
+      "path": "zim_files/devdocs_en_apache-pig_2026-04.zim",
+      "title": "Apache Pig Docs",
+      "size": "504.0 KB",
+      "installed_at": 1777150057.6297657
+    },
+    "devdocs_en_astro": {
+      "path": "zim_files/devdocs_en_astro_2026-04.zim",
+      "title": "Astro Docs",
+      "size": "2.2 MB",
+      "installed_at": 1777150058.6616802
+    },
+    "devdocs_en_async": {
+      "path": "zim_files/devdocs_en_async_2026-02.zim",
+      "title": "Async Docs",
+      "size": "338.0 KB",
+      "installed_at": 1777150059.563198
+    },
+    "devdocs_en_axios": {
+      "path": "zim_files/devdocs_en_axios_2026-02.zim",
+      "title": "Axios Docs",
+      "size": "338.0 KB",
+      "installed_at": 1777150060.44806
+    },
+    "devdocs_en_babel": {
+      "path": "zim_files/devdocs_en_babel_2026-04.zim",
+      "title": "Babel Docs",
+      "size": "564.0 KB",
+      "installed_at": 1777150063.2526405
+    },
+    "devdocs_en_backbone": {
+      "path": "zim_files/devdocs_en_backbone_2026-04.zim",
+      "title": "Backbone.js Docs",
+      "size": "348.0 KB",
+      "installed_at": 1777150064.1601787
+    },
+    "devdocs_en_bazel": {
+      "path": "zim_files/devdocs_en_bazel_2026-04.zim",
+      "title": "Bazel Docs",
+      "size": "432.0 KB",
+      "installed_at": 1777150065.0588956
+    },
+    "devdocs_en_bluebird": {
+      "path": "zim_files/devdocs_en_bluebird_2026-04.zim",
+      "title": "Bluebird Docs",
+      "size": "494.0 KB",
+      "installed_at": 1777150067.2871833
+    },
+    "devdocs_en_bootstrap": {
+      "path": "zim_files/devdocs_en_bootstrap_2026-04.zim",
+      "title": "Bootstrap Docs",
+      "size": "706.0 KB",
+      "installed_at": 1777150068.2240174
+    },
+    "devdocs_en_bottle": {
+      "path": "zim_files/devdocs_en_bottle_2026-04.zim",
+      "title": "Bottle Docs",
+      "size": "411.0 KB",
+      "installed_at": 1777150069.1186755
+    },
+    "devdocs_en_bower": {
+      "path": "zim_files/devdocs_en_bower_2026-04.zim",
+      "title": "Bower Docs",
+      "size": "328.0 KB",
+      "installed_at": 1777150070.038871
+    },
+    "devdocs_en_bun": {
+      "path": "zim_files/devdocs_en_bun_2026-04.zim",
+      "title": "Bun Docs",
+      "size": "1.0 MB",
+      "installed_at": 1777150072.7012427
+    },
+    "devdocs_en_c": {
+      "path": "zim_files/devdocs_en_c_2026-04.zim",
+      "title": "C Docs",
+      "size": "1.2 MB",
+      "installed_at": 1777150073.6589005
+    },
+    "devdocs_en_cakephp": {
+      "path": "zim_files/devdocs_en_cakephp_2026-02.zim",
+      "title": "CakePHP Docs",
+      "size": "2.0 MB",
+      "installed_at": 1777150074.775211
+    },
+    "devdocs_en_chai": {
+      "path": "zim_files/devdocs_en_chai_2026-04.zim",
+      "title": "Chai Docs",
+      "size": "360.0 KB",
+      "installed_at": 1777150075.6869144
+    },
+    "devdocs_en_chef": {
+      "path": "zim_files/devdocs_en_chef_2026-04.zim",
+      "title": "Chef Docs",
+      "size": "12.9 MB",
+      "installed_at": 1777150077.6932347
+    },
+    "devdocs_en_click": {
+      "path": "zim_files/devdocs_en_click_2026-04.zim",
+      "title": "click Docs",
+      "size": "442.0 KB",
+      "installed_at": 1777150078.6003647
+    },
+    "devdocs_en_clojure": {
+      "path": "zim_files/devdocs_en_clojure_2026-02.zim",
+      "title": "Clojure Docs",
+      "size": "425.0 KB",
+      "installed_at": 1777150079.5158494
+    },
+    "devdocs_en_cmake": {
+      "path": "zim_files/devdocs_en_cmake_2026-02.zim",
+      "title": "CMake Docs",
+      "size": "2.5 MB",
+      "installed_at": 1777150080.523217
+    },
+    "devdocs_en_codeception": {
+      "path": "zim_files/devdocs_en_codeception_2026-04.zim",
+      "title": "Codeception Docs",
+      "size": "829.0 KB",
+      "installed_at": 1777150083.6339722
+    },
+    "devdocs_en_codeceptjs": {
+      "path": "zim_files/devdocs_en_codeceptjs_2026-04.zim",
+      "title": "CodeceptJS Docs",
+      "size": "801.0 KB",
+      "installed_at": 1777150084.6570067
+    },
+    "devdocs_en_codeigniter": {
+      "path": "zim_files/devdocs_en_codeigniter_2026-04.zim",
+      "title": "CodeIgniter Docs",
+      "size": "870.0 KB",
+      "installed_at": 1777150085.5733356
+    },
+    "devdocs_en_coffeescript": {
+      "path": "zim_files/devdocs_en_coffeescript_2026-04.zim",
+      "title": "CoffeeScript Docs",
+      "size": "362.0 KB",
+      "installed_at": 1777150087.9164743
+    },
+    "devdocs_en_composer": {
+      "path": "zim_files/devdocs_en_composer_2026-04.zim",
+      "title": "Composer Docs",
+      "size": "426.0 KB",
+      "installed_at": 1777150088.8154578
+    },
+    "devdocs_en_cordova": {
+      "path": "zim_files/devdocs_en_cordova_2026-04.zim",
+      "title": "Cordova Docs",
+      "size": "1.4 MB",
+      "installed_at": 1777150089.7418995
+    },
+    "devdocs_en_couchdb": {
+      "path": "zim_files/devdocs_en_couchdb_2026-04.zim",
+      "title": "CouchDB Docs",
+      "size": "693.0 KB",
+      "installed_at": 1777150090.8371265
+    },
+    "devdocs_en_crystal": {
+      "path": "zim_files/devdocs_en_crystal_2026-04.zim",
+      "title": "Crystal Docs",
+      "size": "2.0 MB",
+      "installed_at": 1777150094.2742198
+    },
+    "devdocs_en_css": {
+      "path": "zim_files/devdocs_en_css_2026-04.zim",
+      "title": "CSS Docs",
+      "size": "4.7 MB",
+      "installed_at": 1777150095.735961
+    },
+    "devdocs_en_cypress": {
+      "path": "zim_files/devdocs_en_cypress_2026-04.zim",
+      "title": "Cypress Docs",
+      "size": "3.9 MB",
+      "installed_at": 1777150098.1314635
+    },
+    "devdocs_en_d": {
+      "path": "zim_files/devdocs_en_d_2026-04.zim",
+      "title": "D Docs",
+      "size": "1.7 MB",
+      "installed_at": 1777150099.5813916
+    },
+    "devdocs_en_d3": {
+      "path": "zim_files/devdocs_en_d3_2026-04.zim",
+      "title": "D3.js Docs",
+      "size": "10.3 MB",
+      "installed_at": 1777150100.7727828
+    },
+    "devdocs_en_dart": {
+      "path": "zim_files/devdocs_en_dart_2026-04.zim",
+      "title": "Dart Docs",
+      "size": "9.8 MB",
+      "installed_at": 1777150103.7334454
+    },
+    "devdocs_en_date-fns": {
+      "path": "zim_files/devdocs_en_date-fns_2026-04.zim",
+      "title": "date-fns Docs",
+      "size": "486.0 KB",
+      "installed_at": 1777150104.6189165
+    },
+    "devdocs_en_deno": {
+      "path": "zim_files/devdocs_en_deno_2026-02.zim",
+      "title": "Deno Docs",
+      "size": "2.6 MB",
+      "installed_at": 1777150105.657842
+    },
+    "devdocs_en_django": {
+      "path": "zim_files/devdocs_en_django_2026-04.zim",
+      "title": "Django Docs",
+      "size": "2.1 MB",
+      "installed_at": 1777150106.6188471
+    },
+    "devdocs_en_django-rest-framework": {
+      "path": "zim_files/devdocs_en_django-rest-framework_2026-04.zim",
+      "title": "Django REST Framework Docs",
+      "size": "584.0 KB",
+      "installed_at": 1777150108.239661
+    },
+    "devdocs_en_dojo": {
+      "path": "zim_files/devdocs_en_dojo_2026-04.zim",
+      "title": "Dojo Docs",
+      "size": "715.0 KB",
+      "installed_at": 1777150109.1655467
+    },
+    "devdocs_en_drupal": {
+      "path": "zim_files/devdocs_en_drupal_2026-04.zim",
+      "title": "Drupal Docs",
+      "size": "12.2 MB",
+      "installed_at": 1777150111.0780914
+    },
+    "devdocs_en_duckdb": {
+      "path": "zim_files/devdocs_en_duckdb_2026-04.zim",
+      "title": "DuckDB Docs",
+      "size": "1.9 MB",
+      "installed_at": 1777150114.1260295
+    },
+    "devdocs_en_eigen3": {
+      "path": "zim_files/devdocs_en_eigen3_2026-04.zim",
+      "title": "Eigen3 Docs",
+      "size": "2.7 MB",
+      "installed_at": 1777150115.1018674
+    },
+    "devdocs_en_electron": {
+      "path": "zim_files/devdocs_en_electron_2026-04.zim",
+      "title": "Electron Docs",
+      "size": "1.6 MB",
+      "installed_at": 1777150116.021394
+    },
+    "devdocs_en_elisp": {
+      "path": "zim_files/devdocs_en_elisp_2026-04.zim",
+      "title": "Elisp Docs",
+      "size": "1.9 MB",
+      "installed_at": 1777150118.4709895
+    },
+    "devdocs_en_elixir": {
+      "path": "zim_files/devdocs_en_elixir_2026-02.zim",
+      "title": "Elixir Docs",
+      "size": "1.2 MB",
+      "installed_at": 1777150119.4115381
+    },
+    "devdocs_en_ember": {
+      "path": "zim_files/devdocs_en_ember_2026-04.zim",
+      "title": "Ember.js Docs",
+      "size": "1.2 MB",
+      "installed_at": 1777150120.4373677
+    },
+    "devdocs_en_enzyme": {
+      "path": "zim_files/devdocs_en_enzyme_2026-04.zim",
+      "title": "Enzyme Docs",
+      "size": "413.0 KB",
+      "installed_at": 1777150121.3286216
+    },
+    "devdocs_en_erlang": {
+      "path": "zim_files/devdocs_en_erlang_2026-02.zim",
+      "title": "Erlang Docs",
+      "size": "3.9 MB",
+      "installed_at": 1777150125.331642
+    },
+    "devdocs_en_es-toolkit": {
+      "path": "zim_files/devdocs_en_es-toolkit_2026-04.zim",
+      "title": "es-toolkit Docs",
+      "size": "746.0 KB",
+      "installed_at": 1777150126.2711027
+    },
+    "devdocs_en_esbuild": {
+      "path": "zim_files/devdocs_en_esbuild_2026-04.zim",
+      "title": "esbuild Docs",
+      "size": "443.0 KB",
+      "installed_at": 1777150128.6055133
+    },
+    "devdocs_en_eslint": {
+      "path": "zim_files/devdocs_en_eslint_2026-04.zim",
+      "title": "ESLint Docs",
+      "size": "1.0 MB",
+      "installed_at": 1777150129.6749952
+    },
+    "devdocs_en_express": {
+      "path": "zim_files/devdocs_en_express_2026-02.zim",
+      "title": "Express Docs",
+      "size": "433.0 KB",
+      "installed_at": 1777150130.5904834
+    },
+    "devdocs_en_falcon": {
+      "path": "zim_files/devdocs_en_falcon_2026-04.zim",
+      "title": "Falcon Docs",
+      "size": "446.0 KB",
+      "installed_at": 1777150131.5234835
+    },
+    "devdocs_en_fastapi": {
+      "path": "zim_files/devdocs_en_fastapi_2026-04.zim",
+      "title": "FastAPI Docs",
+      "size": "2.3 MB",
+      "installed_at": 1777150135.8593156
+    },
+    "devdocs_en_fish": {
+      "path": "zim_files/devdocs_en_fish_2026-04.zim",
+      "title": "Fish Docs",
+      "size": "580.0 KB",
+      "installed_at": 1777150136.7500215
+    },
+    "devdocs_en_flask": {
+      "path": "zim_files/devdocs_en_flask_2026-04.zim",
+      "title": "Flask Docs",
+      "size": "602.0 KB",
+      "installed_at": 1777150138.8673766
+    },
+    "devdocs_en_flow": {
+      "path": "zim_files/devdocs_en_flow_2026-04.zim",
+      "title": "Flow Docs",
+      "size": "481.0 KB",
+      "installed_at": 1777150139.7670279
+    },
+    "devdocs_en_fluture": {
+      "path": "zim_files/devdocs_en_fluture_2026-04.zim",
+      "title": "Fluture Docs",
+      "size": "331.0 KB",
+      "installed_at": 1777150140.6549551
+    },
+    "devdocs_en_gcc": {
+      "path": "zim_files/devdocs_en_gcc_2026-02.zim",
+      "title": "GCC Docs",
+      "size": "1.6 MB",
+      "installed_at": 1777150141.9161496
+    },
+    "devdocs_en_gnu-fortran": {
+      "path": "zim_files/devdocs_en_gnu-fortran_2026-02.zim",
+      "title": "GNU Fortran Docs",
+      "size": "772.0 KB",
+      "installed_at": 1777150144.8263204
+    },
+    "devdocs_en_gnu-make": {
+      "path": "zim_files/devdocs_en_gnu-make_2026-04.zim",
+      "title": "GNU Make Docs",
+      "size": "598.0 KB",
+      "installed_at": 1777150145.8863988
+    },
+    "devdocs_en_gnu-cobol": {
+      "path": "zim_files/devdocs_en_gnu-cobol_2026-04.zim",
+      "title": "GnuCOBOL Docs",
+      "size": "599.0 KB",
+      "installed_at": 1777150146.8120492
+    },
+    "devdocs_en_gnuplot": {
+      "path": "zim_files/devdocs_en_gnuplot_2026-04.zim",
+      "title": "Gnuplot Docs",
+      "size": "639.0 KB",
+      "installed_at": 1777150149.4171698
+    },
+    "devdocs_en_godot": {
+      "path": "zim_files/devdocs_en_godot_2026-04.zim",
+      "title": "Godot Docs",
+      "size": "1.9 MB",
+      "installed_at": 1777150150.5716195
+    },
+    "devdocs_en_graphite": {
+      "path": "zim_files/devdocs_en_graphite_2026-04.zim",
+      "title": "Graphite Docs",
+      "size": "474.0 KB",
+      "installed_at": 1777150151.4721096
+    },
+    "devdocs_en_graphviz": {
+      "path": "zim_files/devdocs_en_graphviz_2026-04.zim",
+      "title": "Graphviz Docs",
+      "size": "895.0 KB",
+      "installed_at": 1777150152.414393
+    },
+    "devdocs_en_groovy": {
+      "path": "zim_files/devdocs_en_groovy_2026-04.zim",
+      "title": "Groovy Docs",
+      "size": "3.2 MB",
+      "installed_at": 1777150156.3322775
+    },
+    "devdocs_en_grunt": {
+      "path": "zim_files/devdocs_en_grunt_2026-04.zim",
+      "title": "Grunt Docs",
+      "size": "372.0 KB",
+      "installed_at": 1777150157.220763
+    },
+    "devdocs_en_gtk": {
+      "path": "zim_files/devdocs_en_gtk_2026-04.zim",
+      "title": "GTK Docs",
+      "size": "2.1 MB",
+      "installed_at": 1777150159.3274531
+    },
+    "devdocs_en_hammerspoon": {
+      "path": "zim_files/devdocs_en_hammerspoon_2026-04.zim",
+      "title": "Hammerspoon Docs",
+      "size": "872.0 KB",
+      "installed_at": 1777150160.4582736
+    },
+    "devdocs_en_handlebars": {
+      "path": "zim_files/devdocs_en_handlebars_2026-04.zim",
+      "title": "Handlebars.js Docs",
+      "size": "344.0 KB",
+      "installed_at": 1777150161.3696918
+    },
+    "devdocs_en_hapi": {
+      "path": "zim_files/devdocs_en_hapi_2026-04.zim",
+      "title": "Hapi Docs",
+      "size": "372.0 KB",
+      "installed_at": 1777150162.2623575
+    },
+    "devdocs_en_haproxy": {
+      "path": "zim_files/devdocs_en_haproxy_2026-04.zim",
+      "title": "HAProxy Docs",
+      "size": "865.0 KB",
+      "installed_at": 1777150166.5126777
+    },
+    "devdocs_en_haskell": {
+      "path": "zim_files/devdocs_en_haskell_2026-04.zim",
+      "title": "Haskell Docs",
+      "size": "4.1 MB",
+      "installed_at": 1777150170.4365728
+    },
+    "devdocs_en_haxe": {
+      "path": "zim_files/devdocs_en_haxe_2026-04.zim",
+      "title": "Haxe Docs",
+      "size": "666.0 KB",
+      "installed_at": 1777150171.3715065
+    },
+    "devdocs_en_homebrew": {
+      "path": "zim_files/devdocs_en_homebrew_2026-04.zim",
+      "title": "Homebrew Docs",
+      "size": "940.0 KB",
+      "installed_at": 1777150172.382641
+    },
+    "devdocs_en_html": {
+      "path": "zim_files/devdocs_en_html_2026-04.zim",
+      "title": "HTML Docs",
+      "size": "1.6 MB",
+      "installed_at": 1777150175.570501
+    },
+    "devdocs_en_htmx": {
+      "path": "zim_files/devdocs_en_htmx_2026-04.zim",
+      "title": "htmx Docs",
+      "size": "437.0 KB",
+      "installed_at": 1777150176.771879
+    },
+    "devdocs_en_http": {
+      "path": "zim_files/devdocs_en_http_2026-04.zim",
+      "title": "HTTP Docs",
+      "size": "1.9 MB",
+      "installed_at": 1777150177.8080385
+    },
+    "devdocs_en_i3": {
+      "path": "zim_files/devdocs_en_i3_2026-02.zim",
+      "title": "i3 Docs",
+      "size": "443.0 KB",
+      "installed_at": 1777150180.878481
+    },
+    "devdocs_en_immutable": {
+      "path": "zim_files/devdocs_en_immutable_2026-04.zim",
+      "title": "Immutable.js Docs",
+      "size": "383.0 KB",
+      "installed_at": 1777150181.7933817
+    },
+    "devdocs_en_influxdata": {
+      "path": "zim_files/devdocs_en_influxdata_2026-04.zim",
+      "title": "InfluxData Docs",
+      "size": "1.8 MB",
+      "installed_at": 1777150183.0495412
+    },
+    "devdocs_en_jasmine": {
+      "path": "zim_files/devdocs_en_jasmine_2026-04.zim",
+      "title": "Jasmine Docs",
+      "size": "343.0 KB",
+      "installed_at": 1777150185.3619668
+    },
+    "devdocs_en_jekyll": {
+      "path": "zim_files/devdocs_en_jekyll_2026-04.zim",
+      "title": "Jekyll Docs",
+      "size": "461.0 KB",
+      "installed_at": 1777150186.3593364
+    },
+    "devdocs_en_jest": {
+      "path": "zim_files/devdocs_en_jest_2026-04.zim",
+      "title": "Jest Docs",
+      "size": "545.0 KB",
+      "installed_at": 1777150187.6691632
+    },
+    "devdocs_en_jinja": {
+      "path": "zim_files/devdocs_en_jinja_2026-04.zim",
+      "title": "Jinja Docs",
+      "size": "436.0 KB",
+      "installed_at": 1777150188.6374273
+    },
+    "devdocs_en_joi": {
+      "path": "zim_files/devdocs_en_joi_2026-04.zim",
+      "title": "Joi Docs",
+      "size": "366.0 KB",
+      "installed_at": 1777150191.3150532
+    },
+    "devdocs_en_jq": {
+      "path": "zim_files/devdocs_en_jq_2026-04.zim",
+      "title": "jq Docs",
+      "size": "366.0 KB",
+      "installed_at": 1777150192.1894412
+    },
+    "devdocs_en_jquery": {
+      "path": "zim_files/devdocs_en_jquery_2026-04.zim",
+      "title": "jQuery Docs",
+      "size": "1.1 MB",
+      "installed_at": 1777150193.135375
+    },
+    "devdocs_en_jquerymobile": {
+      "path": "zim_files/devdocs_en_jquerymobile_2026-04.zim",
+      "title": "jQuery Mobile Docs",
+      "size": "512.0 KB",
+      "installed_at": 1777150195.7141657
+    },
+    "devdocs_en_jqueryui": {
+      "path": "zim_files/devdocs_en_jqueryui_2026-04.zim",
+      "title": "jQuery UI Docs",
+      "size": "451.0 KB",
+      "installed_at": 1777150196.6503806
+    },
+    "devdocs_en_jsdoc": {
+      "path": "zim_files/devdocs_en_jsdoc_2026-04.zim",
+      "title": "JSDoc Docs",
+      "size": "392.0 KB",
+      "installed_at": 1777150197.5363467
+    },
+    "devdocs_en_julia": {
+      "path": "zim_files/devdocs_en_julia_2026-02.zim",
+      "title": "Julia Docs",
+      "size": "1.5 MB",
+      "installed_at": 1777150198.5120234
+    },
+    "devdocs_en_knockout": {
+      "path": "zim_files/devdocs_en_knockout_2026-02.zim",
+      "title": "Knockout.js Docs",
+      "size": "469.0 KB",
+      "installed_at": 1777150201.0508947
+    },
+    "devdocs_en_koa": {
+      "path": "zim_files/devdocs_en_koa_2026-04.zim",
+      "title": "Koa Docs",
+      "size": "410.0 KB",
+      "installed_at": 1777150201.9323633
+    },
+    "devdocs_en_kotlin": {
+      "path": "zim_files/devdocs_en_kotlin_2026-04.zim",
+      "title": "Kotlin Docs",
+      "size": "7.8 MB",
+      "installed_at": 1777150205.576939
+    },
+    "devdocs_en_kubectl": {
+      "path": "zim_files/devdocs_en_kubectl_2026-04.zim",
+      "title": "Kubectl Docs",
+      "size": "357.0 KB",
+      "installed_at": 1777150206.4477863
+    },
+    "devdocs_en_kubernetes": {
+      "path": "zim_files/devdocs_en_kubernetes_2026-04.zim",
+      "title": "Kubernetes Docs",
+      "size": "570.0 KB",
+      "installed_at": 1777150207.3605633
+    },
+    "devdocs_en_laravel": {
+      "path": "zim_files/devdocs_en_laravel_2026-02.zim",
+      "title": "Laravel Docs",
+      "size": "3.7 MB",
+      "installed_at": 1777150208.4043775
+    },
+    "devdocs_en_latex": {
+      "path": "zim_files/devdocs_en_latex_2026-02.zim",
+      "title": "LaTeX Docs",
+      "size": "766.0 KB",
+      "installed_at": 1777150212.6194537
+    },
+    "devdocs_en_leaflet": {
+      "path": "zim_files/devdocs_en_leaflet_2026-02.zim",
+      "title": "Leaflet Docs",
+      "size": "403.0 KB",
+      "installed_at": 1777150213.5645657
+    },
+    "devdocs_en_less": {
+      "path": "zim_files/devdocs_en_less_2026-04.zim",
+      "title": "Less Docs",
+      "size": "356.0 KB",
+      "installed_at": 1777150215.340795
+    },
+    "devdocs_en_man": {
+      "path": "zim_files/devdocs_en_man_2026-04.zim",
+      "title": "Linux man pages Docs",
+      "size": "28.2 MB",
+      "installed_at": 1777150217.22697
+    },
+    "devdocs_en_liquid": {
+      "path": "zim_files/devdocs_en_liquid_2026-04.zim",
+      "title": "Liquid Docs",
+      "size": "341.0 KB",
+      "installed_at": 1777150218.217832
+    },
+    "devdocs_en_lit": {
+      "path": "zim_files/devdocs_en_lit_2026-04.zim",
+      "title": "Lit Docs",
+      "size": "721.0 KB",
+      "installed_at": 1777150219.1144617
+    },
+    "devdocs_en_lodash": {
+      "path": "zim_files/devdocs_en_lodash_2026-04.zim",
+      "title": "lodash Docs",
+      "size": "360.0 KB",
+      "installed_at": 1777150221.2718682
+    },
+    "devdocs_en_lua": {
+      "path": "zim_files/devdocs_en_lua_2026-02.zim",
+      "title": "Lua Docs",
+      "size": "417.0 KB",
+      "installed_at": 1777150222.2000916
+    },
+    "devdocs_en_love": {
+      "path": "zim_files/devdocs_en_love_2026-04.zim",
+      "title": "L\u00d6VE Docs",
+      "size": "1.5 MB",
+      "installed_at": 1777150223.1914153
+    },
+    "devdocs_en_mariadb": {
+      "path": "zim_files/devdocs_en_mariadb_2026-04.zim",
+      "title": "MariaDB Docs",
+      "size": "9.3 MB",
+      "installed_at": 1777150226.48606
+    },
+    "devdocs_en_marionette": {
+      "path": "zim_files/devdocs_en_marionette_2026-04.zim",
+      "title": "Marionette.js Docs",
+      "size": "396.0 KB",
+      "installed_at": 1777150227.392986
+    },
+    "devdocs_en_markdown": {
+      "path": "zim_files/devdocs_en_markdown_2026-04.zim",
+      "title": "Markdown Docs",
+      "size": "324.0 KB",
+      "installed_at": 1777150228.291138
+    },
+    "devdocs_en_matplotlib": {
+      "path": "zim_files/devdocs_en_matplotlib_2026-04.zim",
+      "title": "Matplotlib Docs",
+      "size": "31.5 MB",
+      "installed_at": 1777150232.3545754
+    },
+    "devdocs_en_meteor": {
+      "path": "zim_files/devdocs_en_meteor_2026-04.zim",
+      "title": "Meteor Docs",
+      "size": "1.3 MB",
+      "installed_at": 1777150233.2892966
+    },
+    "devdocs_en_mocha": {
+      "path": "zim_files/devdocs_en_mocha_2026-04.zim",
+      "title": "Mocha Docs",
+      "size": "646.0 KB",
+      "installed_at": 1777150234.2170968
+    },
+    "devdocs_en_modernizr": {
+      "path": "zim_files/devdocs_en_modernizr_2026-04.zim",
+      "title": "Modernizr Docs",
+      "size": "343.0 KB",
+      "installed_at": 1777150236.2978594
+    },
+    "devdocs_en_moment": {
+      "path": "zim_files/devdocs_en_moment_2026-04.zim",
+      "title": "Moment.js Docs",
+      "size": "395.0 KB",
+      "installed_at": 1777150237.2195306
+    },
+    "devdocs_en_moment-timezone": {
+      "path": "zim_files/devdocs_en_moment-timezone_2026-02.zim",
+      "title": "Moment.js Timezone Docs",
+      "size": "329.0 KB",
+      "installed_at": 1777150238.1151555
+    },
+    "devdocs_en_mongoose": {
+      "path": "zim_files/devdocs_en_mongoose_2026-04.zim",
+      "title": "Mongoose Docs",
+      "size": "585.0 KB",
+      "installed_at": 1777150239.03178
+    },
+    "devdocs_en_nextjs": {
+      "path": "zim_files/devdocs_en_nextjs_2026-04.zim",
+      "title": "Next.js Docs",
+      "size": "1018.0 KB",
+      "installed_at": 1777150243.0941503
+    },
+    "devdocs_en_nginx-lua-module": {
+      "path": "zim_files/devdocs_en_nginx-lua-module_2026-02.zim",
+      "title": "nginx / Lua Module Docs",
+      "size": "584.0 KB",
+      "installed_at": 1777150243.9964619
+    },
+    "devdocs_en_nginx": {
+      "path": "zim_files/devdocs_en_nginx_2026-04.zim",
+      "title": "nginx Docs",
+      "size": "796.0 KB",
+      "installed_at": 1777150246.1775498
+    },
+    "devdocs_en_nim": {
+      "path": "zim_files/devdocs_en_nim_2026-04.zim",
+      "title": "Nim Docs",
+      "size": "2.0 MB",
+      "installed_at": 1777150247.386306
+    },
+    "devdocs_en_nix": {
+      "path": "zim_files/devdocs_en_nix_2026-04.zim",
+      "title": "Nix Docs",
+      "size": "390.0 KB",
+      "installed_at": 1777150248.2691877
+    },
+    "devdocs_en_node": {
+      "path": "zim_files/devdocs_en_node_2026-02.zim",
+      "title": "Node.js Docs",
+      "size": "1.3 MB",
+      "installed_at": 1777150249.2362187
+    },
+    "devdocs_en_nokogiri": {
+      "path": "zim_files/devdocs_en_nokogiri_2026-04.zim",
+      "title": "Nokogiri Docs",
+      "size": "450.0 KB",
+      "installed_at": 1777150251.7696705
+    },
+    "devdocs_en_npm": {
+      "path": "zim_files/devdocs_en_npm_2026-02.zim",
+      "title": "npm Docs",
+      "size": "649.0 KB",
+      "installed_at": 1777150253.0082088
+    },
+    "devdocs_en_numpy": {
+      "path": "zim_files/devdocs_en_numpy_2026-04.zim",
+      "title": "NumPy Docs",
+      "size": "5.0 MB",
+      "installed_at": 1777150254.2263715
+    },
+    "devdocs_en_nushell": {
+      "path": "zim_files/devdocs_en_nushell_2026-02.zim",
+      "title": "Nushell Docs",
+      "size": "674.0 KB",
+      "installed_at": 1777150256.1991925
+    },
+    "devdocs_en_ocaml": {
+      "path": "zim_files/devdocs_en_ocaml_2026-02.zim",
+      "title": "OCaml Docs",
+      "size": "1.7 MB",
+      "installed_at": 1777150258.5200267
+    },
+    "devdocs_en_octave": {
+      "path": "zim_files/devdocs_en_octave_2026-02.zim",
+      "title": "Octave Docs",
+      "size": "2.0 MB",
+      "installed_at": 1777150259.754185
+    },
+    "devdocs_en_opengl": {
+      "path": "zim_files/devdocs_en_opengl_2026-04.zim",
+      "title": "OpenGL Docs",
+      "size": "970.0 KB",
+      "installed_at": 1777150262.8225408
+    },
+    "devdocs_en_openjdk": {
+      "path": "zim_files/devdocs_en_openjdk_2026-02.zim",
+      "title": "OpenJDK Docs",
+      "size": "14.4 MB",
+      "installed_at": 1777150264.4296632
+    },
+    "devdocs_en_openlayers": {
+      "path": "zim_files/devdocs_en_openlayers_2026-03.zim",
+      "title": "OpenLayers Docs",
+      "size": "833.0 KB",
+      "installed_at": 1777150265.3355336
+    },
+    "devdocs_en_opentsdb": {
+      "path": "zim_files/devdocs_en_opentsdb_2026-04.zim",
+      "title": "OpenTSDB Docs",
+      "size": "567.0 KB",
+      "installed_at": 1777150268.2963092
+    },
+    "devdocs_en_padrino": {
+      "path": "zim_files/devdocs_en_padrino_2026-04.zim",
+      "title": "Padrino Docs",
+      "size": "494.0 KB",
+      "installed_at": 1777150269.1880796
+    },
+    "devdocs_en_pandas": {
+      "path": "zim_files/devdocs_en_pandas_2026-04.zim",
+      "title": "pandas Docs",
+      "size": "4.7 MB",
+      "installed_at": 1777150272.6063783
+    },
+    "devdocs_en_perl": {
+      "path": "zim_files/devdocs_en_perl_2026-04.zim",
+      "title": "Perl Docs",
+      "size": "5.1 MB",
+      "installed_at": 1777150273.6547892
+    },
+    "devdocs_en_phalcon": {
+      "path": "zim_files/devdocs_en_phalcon_2026-04.zim",
+      "title": "Phalcon Docs",
+      "size": "1.0 MB",
+      "installed_at": 1777150274.579982
+    },
+    "devdocs_en_phaser": {
+      "path": "zim_files/devdocs_en_phaser_2026-04.zim",
+      "title": "Phaser Docs",
+      "size": "916.0 KB",
+      "installed_at": 1777150275.5114346
+    },
+    "devdocs_en_phoenix": {
+      "path": "zim_files/devdocs_en_phoenix_2026-04.zim",
+      "title": "Phoenix Docs",
+      "size": "1.2 MB",
+      "installed_at": 1777150277.969671
+    },
+    "devdocs_en_php": {
+      "path": "zim_files/devdocs_en_php_2026-02.zim",
+      "title": "PHP Docs",
+      "size": "6.8 MB",
+      "installed_at": 1777150279.3881986
+    },
+    "devdocs_en_phpunit": {
+      "path": "zim_files/devdocs_en_phpunit_2026-02.zim",
+      "title": "PHPUnit Docs",
+      "size": "426.0 KB",
+      "installed_at": 1777150280.2930284
+    },
+    "devdocs_en_playwright": {
+      "path": "zim_files/devdocs_en_playwright_2026-04.zim",
+      "title": "Playwright Docs",
+      "size": "813.0 KB",
+      "installed_at": 1777150283.3833387
+    },
+    "devdocs_en_point-cloud-library": {
+      "path": "zim_files/devdocs_en_point-cloud-library_2026-04.zim",
+      "title": "PointCloudLibrary Docs",
+      "size": "9.5 MB",
+      "installed_at": 1777150284.8738565
+    },
+    "devdocs_en_pony": {
+      "path": "zim_files/devdocs_en_pony_2026-04.zim",
+      "title": "Pony Docs",
+      "size": "750.0 KB",
+      "installed_at": 1777150285.7739022
+    },
+    "devdocs_en_postgresql": {
+      "path": "zim_files/devdocs_en_postgresql_2026-02.zim",
+      "title": "PostgreSQL Docs",
+      "size": "2.5 MB",
+      "installed_at": 1777150288.3250024
+    },
+    "devdocs_en_prettier": {
+      "path": "zim_files/devdocs_en_prettier_2026-04.zim",
+      "title": "Prettier Docs",
+      "size": "438.0 KB",
+      "installed_at": 1777150289.2249346
+    },
+    "devdocs_en_pug": {
+      "path": "zim_files/devdocs_en_pug_2026-04.zim",
+      "title": "Pug Docs",
+      "size": "346.0 KB",
+      "installed_at": 1777150290.1803262
+    },
+    "devdocs_en_puppeteer": {
+      "path": "zim_files/devdocs_en_puppeteer_2026-04.zim",
+      "title": "Puppeteer Docs",
+      "size": "385.0 KB",
+      "installed_at": 1777150292.7562215
+    },
+    "devdocs_en_pygame": {
+      "path": "zim_files/devdocs_en_pygame_2026-04.zim",
+      "title": "Pygame Docs",
+      "size": "541.0 KB",
+      "installed_at": 1777150293.6907992
+    },
+    "devdocs_en_pytorch": {
+      "path": "zim_files/devdocs_en_pytorch_2026-04.zim",
+      "title": "PyTorch Docs",
+      "size": "6.1 MB",
+      "installed_at": 1777150297.822023
+    },
+    "devdocs_en_q": {
+      "path": "zim_files/devdocs_en_q_2026-04.zim",
+      "title": "Q Docs",
+      "size": "327.0 KB",
+      "installed_at": 1777150298.743314
+    },
+    "devdocs_en_qt": {
+      "path": "zim_files/devdocs_en_qt_2026-04.zim",
+      "title": "Qt Docs",
+      "size": "47.7 MB",
+      "installed_at": 1777150304.100458
+    },
+    "devdocs_en_qunit": {
+      "path": "zim_files/devdocs_en_qunit_2026-04.zim",
+      "title": "QUnit Docs",
+      "size": "437.0 KB",
+      "installed_at": 1777150304.9925325
+    },
+    "devdocs_en_r": {
+      "path": "zim_files/devdocs_en_r_2026-04.zim",
+      "title": "R Docs",
+      "size": "4.7 MB",
+      "installed_at": 1777150305.9895377
+    },
+    "devdocs_en_ramda": {
+      "path": "zim_files/devdocs_en_ramda_2026-04.zim",
+      "title": "Ramda Docs",
+      "size": "376.0 KB",
+      "installed_at": 1777150308.6972818
+    },
+    "devdocs_en_react-bootstrap": {
+      "path": "zim_files/devdocs_en_react-bootstrap_2026-04.zim",
+      "title": "React Bootstrap Docs",
+      "size": "411.0 KB",
+      "installed_at": 1777150309.5791395
+    },
+    "devdocs_en_react": {
+      "path": "zim_files/devdocs_en_react_2026-02.zim",
+      "title": "React Docs",
+      "size": "2.6 MB",
+      "installed_at": 1777150310.5958238
+    },
+    "devdocs_en_react-native": {
+      "path": "zim_files/devdocs_en_react-native_2026-04.zim",
+      "title": "React Native Docs",
+      "size": "2.0 MB",
+      "installed_at": 1777150312.8145084
+    },
+    "devdocs_en_react-router": {
+      "path": "zim_files/devdocs_en_react-router_2026-04.zim",
+      "title": "React Router Docs",
+      "size": "484.0 KB",
+      "installed_at": 1777150313.7440305
+    },
+    "devdocs_en_reactivex": {
+      "path": "zim_files/devdocs_en_reactivex_2026-04.zim",
+      "title": "ReactiveX Docs",
+      "size": "478.0 KB",
+      "installed_at": 1777150314.7314448
+    },
+    "devdocs_en_redis": {
+      "path": "zim_files/devdocs_en_redis_2026-04.zim",
+      "title": "Redis Docs",
+      "size": "850.0 KB",
+      "installed_at": 1777150315.7385058
+    },
+    "devdocs_en_redux": {
+      "path": "zim_files/devdocs_en_redux_2026-04.zim",
+      "title": "Redux Docs",
+      "size": "329.0 KB",
+      "installed_at": 1777150317.9743664
+    },
+    "devdocs_en_relay": {
+      "path": "zim_files/devdocs_en_relay_2026-02.zim",
+      "title": "Relay Docs",
+      "size": "372.0 KB",
+      "installed_at": 1777150318.8896759
+    },
+    "devdocs_en_requests": {
+      "path": "zim_files/devdocs_en_requests_2026-04.zim",
+      "title": "Requests Docs",
+      "size": "344.0 KB",
+      "installed_at": 1777150319.907263
+    },
+    "devdocs_en_requirejs": {
+      "path": "zim_files/devdocs_en_requirejs_2026-04.zim",
+      "title": "RequireJS Docs",
+      "size": "379.0 KB",
+      "installed_at": 1777150320.8100553
+    },
+    "devdocs_en_rethinkdb": {
+      "path": "zim_files/devdocs_en_rethinkdb_2026-04.zim",
+      "title": "RethinkDB Docs",
+      "size": "1.6 MB",
+      "installed_at": 1777150324.159079
+    },
+    "devdocs_en_minitest": {
+      "path": "zim_files/devdocs_en_minitest_2026-04.zim",
+      "title": "Ruby / Minitest Docs",
+      "size": "367.0 KB",
+      "installed_at": 1777150325.1259353
+    },
+    "devdocs_en_ruby": {
+      "path": "zim_files/devdocs_en_ruby_2026-04.zim",
+      "title": "Ruby Docs",
+      "size": "2.0 MB",
+      "installed_at": 1777150326.1474626
+    },
+    "devdocs_en_rails": {
+      "path": "zim_files/devdocs_en_rails_2026-04.zim",
+      "title": "Ruby on Rails Docs",
+      "size": "2.8 MB",
+      "installed_at": 1777150330.2114477
+    },
+    "devdocs_en_rxjs": {
+      "path": "zim_files/devdocs_en_rxjs_2026-02.zim",
+      "title": "RxJS Docs",
+      "size": "1.3 MB",
+      "installed_at": 1777150331.2435315
+    },
+    "devdocs_en_saltstack": {
+      "path": "zim_files/devdocs_en_saltstack_2026-04.zim",
+      "title": "SaltStack Docs",
+      "size": "2.9 MB",
+      "installed_at": 1777150335.9693573
+    },
+    "devdocs_en_sanctuary-def": {
+      "path": "zim_files/devdocs_en_sanctuary-def_2026-04.zim",
+      "title": "Sanctuary Def Docs",
+      "size": "310.0 KB",
+      "installed_at": 1777150336.8517616
+    },
+    "devdocs_en_sanctuary": {
+      "path": "zim_files/devdocs_en_sanctuary_2026-04.zim",
+      "title": "Sanctuary Docs",
+      "size": "347.0 KB",
+      "installed_at": 1777150339.0559568
+    },
+    "devdocs_en_sanctuary-type-classes": {
+      "path": "zim_files/devdocs_en_sanctuary-type-classes_2026-02.zim",
+      "title": "Sanctuary Type Classes Docs",
+      "size": "309.0 KB",
+      "installed_at": 1777150339.9704769
+    },
+    "devdocs_en_sass": {
+      "path": "zim_files/devdocs_en_sass_2026-02.zim",
+      "title": "Sass Docs",
+      "size": "638.0 KB",
+      "installed_at": 1777150340.9098105
+    },
+    "devdocs_en_scala": {
+      "path": "zim_files/devdocs_en_scala_2026-04.zim",
+      "title": "Scala Docs",
+      "size": "3.7 MB",
+      "installed_at": 1777150341.9770331
+    },
+    "devdocs_en_scikit-image": {
+      "path": "zim_files/devdocs_en_scikit-image_2026-04.zim",
+      "title": "scikit-image Docs",
+      "size": "10.8 MB",
+      "installed_at": 1777150349.1825492
+    },
+    "devdocs_en_scikit-learn": {
+      "path": "zim_files/devdocs_en_scikit-learn_2026-04.zim",
+      "title": "scikit-learn Docs",
+      "size": "54.3 MB",
+      "installed_at": 1777150357.2479808
+    },
+    "devdocs_en_sequelize": {
+      "path": "zim_files/devdocs_en_sequelize_2026-04.zim",
+      "title": "Sequelize Docs",
+      "size": "519.0 KB",
+      "installed_at": 1777150359.1826127
+    },
+    "devdocs_en_sinon": {
+      "path": "zim_files/devdocs_en_sinon_2026-02.zim",
+      "title": "Sinon.JS Docs",
+      "size": "352.0 KB",
+      "installed_at": 1777150360.0962598
+    },
+    "devdocs_en_socketio": {
+      "path": "zim_files/devdocs_en_socketio_2026-04.zim",
+      "title": "Socket.IO Docs",
+      "size": "1.1 MB",
+      "installed_at": 1777150361.2006192
+    },
+    "devdocs_en_spring-boot": {
+      "path": "zim_files/devdocs_en_spring-boot_2026-04.zim",
+      "title": "Spring Boot Docs",
+      "size": "812.0 KB",
+      "installed_at": 1777150362.1168184
+    },
+    "devdocs_en_sqlite": {
+      "path": "zim_files/devdocs_en_sqlite_2026-04.zim",
+      "title": "SQLite Docs",
+      "size": "3.4 MB",
+      "installed_at": 1777150364.6752083
+    },
+    "devdocs_en_statsmodels": {
+      "path": "zim_files/devdocs_en_statsmodels_2026-02.zim",
+      "title": "Statsmodels Docs",
+      "size": "8.0 MB",
+      "installed_at": 1777150365.7422316
+    },
+    "devdocs_en_browser-support-tables": {
+      "path": "zim_files/devdocs_en_browser-support-tables_2026-04.zim",
+      "title": "Support Tables Docs",
+      "size": "1.3 MB",
+      "installed_at": 1777150366.7056441
+    },
+    "devdocs_en_svelte": {
+      "path": "zim_files/devdocs_en_svelte_2026-04.zim",
+      "title": "Svelte Docs",
+      "size": "530.0 KB",
+      "installed_at": 1777150367.6075816
+    },
+    "devdocs_en_svg": {
+      "path": "zim_files/devdocs_en_svg_2026-04.zim",
+      "title": "SVG Docs",
+      "size": "865.0 KB",
+      "installed_at": 1777150369.7140963
+    },
+    "devdocs_en_symfony": {
+      "path": "zim_files/devdocs_en_symfony_2026-04.zim",
+      "title": "Symfony Docs",
+      "size": "2.9 MB",
+      "installed_at": 1777150370.69792
+    },
+    "devdocs_en_tailwindcss": {
+      "path": "zim_files/devdocs_en_tailwindcss_2026-02.zim",
+      "title": "Tailwind CSS Docs",
+      "size": "554.0 KB",
+      "installed_at": 1777150371.5968318
+    },
+    "devdocs_en_tcl-tk": {
+      "path": "zim_files/devdocs_en_tcl-tk_2026-04.zim",
+      "title": "Tcl/Tk Docs",
+      "size": "1.3 MB",
+      "installed_at": 1777150372.5531101
+    },
+    "devdocs_en_tcllib": {
+      "path": "zim_files/devdocs_en_tcllib_2026-04.zim",
+      "title": "Tcllib Docs",
+      "size": "1.6 MB",
+      "installed_at": 1777150375.6235044
+    },
+    "devdocs_en_tensorflow-cpp": {
+      "path": "zim_files/devdocs_en_tensorflow-cpp_2026-02.zim",
+      "title": "TensorFlow C++ Docs",
+      "size": "1.4 MB",
+      "installed_at": 1777150376.549368
+    },
+    "devdocs_en_tensorflow": {
+      "path": "zim_files/devdocs_en_tensorflow_2026-02.zim",
+      "title": "TensorFlow Docs",
+      "size": "6.0 MB",
+      "installed_at": 1777150377.9156034
+    },
+    "devdocs_en_terraform": {
+      "path": "zim_files/devdocs_en_terraform_2026-04.zim",
+      "title": "Terraform Docs",
+      "size": "3.0 MB",
+      "installed_at": 1777150379.8165095
+    },
+    "devdocs_en_threejs": {
+      "path": "zim_files/devdocs_en_threejs_2026-03.zim",
+      "title": "Three.js Docs",
+      "size": "856.0 KB",
+      "installed_at": 1777150380.8448079
+    },
+    "devdocs_en_trio": {
+      "path": "zim_files/devdocs_en_trio_2026-04.zim",
+      "title": "Trio Docs",
+      "size": "476.0 KB",
+      "installed_at": 1777150382.161456
+    },
+    "devdocs_en_twig": {
+      "path": "zim_files/devdocs_en_twig_2026-04.zim",
+      "title": "Twig Docs",
+      "size": "426.0 KB",
+      "installed_at": 1777150383.0486195
+    },
+    "devdocs_en_underscore": {
+      "path": "zim_files/devdocs_en_underscore_2026-04.zim",
+      "title": "Underscore.js Docs",
+      "size": "332.0 KB",
+      "installed_at": 1777150385.0054889
+    },
+    "devdocs_en_vagrant": {
+      "path": "zim_files/devdocs_en_vagrant_2026-04.zim",
+      "title": "Vagrant Docs",
+      "size": "540.0 KB",
+      "installed_at": 1777150385.9074974
+    },
+    "devdocs_en_varnish": {
+      "path": "zim_files/devdocs_en_varnish_2026-04.zim",
+      "title": "Varnish Docs",
+      "size": "635.0 KB",
+      "installed_at": 1777150387.4472263
+    },
+    "devdocs_en_vertx": {
+      "path": "zim_files/devdocs_en_vertx_2026-04.zim",
+      "title": "Vert.x Docs",
+      "size": "1.5 MB",
+      "installed_at": 1777150391.3510568
+    },
+    "devdocs_en_vite": {
+      "path": "zim_files/devdocs_en_vite_2026-04.zim",
+      "title": "Vite Docs",
+      "size": "496.0 KB",
+      "installed_at": 1777150392.2523172
+    },
+    "devdocs_en_vitest": {
+      "path": "zim_files/devdocs_en_vitest_2026-04.zim",
+      "title": "Vitest Docs",
+      "size": "755.0 KB",
+      "installed_at": 1777150393.1605432
+    },
+    "devdocs_en_vue": {
+      "path": "zim_files/devdocs_en_vue_2026-02.zim",
+      "title": "Vue Docs",
+      "size": "951.0 KB",
+      "installed_at": 1777150395.1053145
+    },
+    "devdocs_en_vue-router": {
+      "path": "zim_files/devdocs_en_vue-router_2026-04.zim",
+      "title": "Vue Router Docs",
+      "size": "511.0 KB",
+      "installed_at": 1777150396.040076
+    },
+    "devdocs_en_vueuse": {
+      "path": "zim_files/devdocs_en_vueuse_2026-04.zim",
+      "title": "VueUse Docs",
+      "size": "715.0 KB",
+      "installed_at": 1777150396.9282143
+    },
+    "devdocs_en_vuex": {
+      "path": "zim_files/devdocs_en_vuex_2026-02.zim",
+      "title": "Vuex Docs",
+      "size": "371.0 KB",
+      "installed_at": 1777150397.8359475
+    },
+    "devdocs_en_vulkan": {
+      "path": "zim_files/devdocs_en_vulkan_2026-04.zim",
+      "title": "Vulkan Docs",
+      "size": "532.0 KB",
+      "installed_at": 1777150400.8457391
+    },
+    "devdocs_en_wagtail": {
+      "path": "zim_files/devdocs_en_wagtail_2026-04.zim",
+      "title": "Wagtail Docs",
+      "size": "1.3 MB",
+      "installed_at": 1777150401.8574586
+    },
+    "devdocs_en_dom": {
+      "path": "zim_files/devdocs_en_dom_2026-02.zim",
+      "title": "Web APIs Docs",
+      "size": "13.5 MB",
+      "installed_at": 1777150403.560468
+    },
+    "devdocs_en_web-extensions": {
+      "path": "zim_files/devdocs_en_web-extensions_2026-04.zim",
+      "title": "Web Extensions Docs",
+      "size": "4.0 MB",
+      "installed_at": 1777150405.1902761
+    },
+    "devdocs_en_webpack": {
+      "path": "zim_files/devdocs_en_webpack_2026-02.zim",
+      "title": "webpack Docs",
+      "size": "769.0 KB",
+      "installed_at": 1777150406.1321244
+    },
+    "devdocs_en_werkzeug": {
+      "path": "zim_files/devdocs_en_werkzeug_2026-04.zim",
+      "title": "Werkzeug Docs",
+      "size": "489.0 KB",
+      "installed_at": 1777150407.0624182
+    },
+    "devdocs_en_wordpress": {
+      "path": "zim_files/devdocs_en_wordpress_2026-04.zim",
+      "title": "WordPress Docs",
+      "size": "12.3 MB",
+      "installed_at": 1777150413.1564507
+    },
+    "devdocs_en_xslt-xpath": {
+      "path": "zim_files/devdocs_en_xslt-xpath_2026-04.zim",
+      "title": "XSLT & XPath Docs",
+      "size": "417.0 KB",
+      "installed_at": 1777150416.067676
+    },
+    "devdocs_en_yarn": {
+      "path": "zim_files/devdocs_en_yarn_2026-04.zim",
+      "title": "Yarn Docs",
+      "size": "593.0 KB",
+      "installed_at": 1777150416.986466
+    },
+    "devdocs_en_yii": {
+      "path": "zim_files/devdocs_en_yii_2026-04.zim",
+      "title": "Yii Docs",
+      "size": "2.0 MB",
+      "installed_at": 1777150417.9482474
+    },
+    "devdocs_en_zig": {
+      "path": "zim_files/devdocs_en_zig_2026-02.zim",
+      "title": "Zig Docs",
+      "size": "475.0 KB",
+      "installed_at": 1777150418.8465774
+    },
+    "devdocs_en_zsh": {
+      "path": "zim_files/devdocs_en_zsh_2026-04.zim",
+      "title": "Zsh Docs",
+      "size": "763.0 KB",
+      "installed_at": 1777150423.1875055
+    }
+  },
   "downloading": {}
 }
