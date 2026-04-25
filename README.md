@@ -6,6 +6,8 @@ A backend service that enables locally-run AI models to work with offline web co
 
 - 🔗 **Independent Backend**: Works standalone without requiring the web GUI
 - 📚 **ZIM File Processing**: Ingest offline Wikipedia and other Kiwix content
+- 💾 **ZIM File Manager**: Download and manage ZIM files from terminal
+- 🎯 **AI Tunings**: Pre-configured collections (Research, Learn, Literature, Coding, Custom)
 - 🧠 **Semantic Search**: Uses embeddings to find relevant context
 - 💬 **Conversational AI**: Chat interface with context-aware responses
 - 💾 **Conversation History**: Track and retrieve past conversations
@@ -48,12 +50,24 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### 1. Start Tensor Serve
+### 1. Install ZIM Files (First Time Only)
+```bash
+# List available files
+python manage_zim.py list
+
+# Install files interactively
+python manage_zim.py install-tuning research
+
+# Check status
+python manage_zim.py status research
+```
+
+### 2. Start Tensor Serve
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### 2. Configure AI Endpoint
+### 3. Configure AI Endpoint
 ```bash
 curl -X POST http://localhost:8000/config/set-ai-endpoint \
   -H "Content-Type: application/json" \
@@ -63,23 +77,18 @@ curl -X POST http://localhost:8000/config/set-ai-endpoint \
   }'
 ```
 
-### 3. Ingest Content
+### 4. Ingest Tuning
 ```bash
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "zim_path": "/path/to/wikipedia.zim",
-    "output_name": "zim_db"
-  }'
+# Ingest the Research tuning
+curl -X POST http://localhost:8000/tunings/research/ingest
 ```
 
-### 4. Load Database
+### 5. Load Database and Chat
 ```bash
-curl -X GET "http://localhost:8000/load?name=zim_db"
-```
+# Load the database
+curl -X GET "http://localhost:8000/load?name=research_db"
 
-### 5. Start Chatting
-```bash
+# Start chatting
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{
@@ -87,6 +96,8 @@ curl -X POST http://localhost:8000/chat \
   }'
 ```
 
+See [ZIM_MANAGER.md](./ZIM_MANAGER.md) for ZIM file management!
+See [TUNINGS.md](./TUNINGS.md) for detailed tuning guide!
 See [API.md](./API.md) for complete API documentation.
 
 ## Project Structure
@@ -96,14 +107,17 @@ tensor-serve/
 ├── main.py              # FastAPI application and routes
 ├── config.py            # Configuration management
 ├── conversations.py     # Conversation history (SQLite)
+├── tunings.py           # AI model tunings (presets + custom)
 ├── ai_client.py         # AI endpoint communication
 ├── embedder.py          # Embedding model (sentence-transformers)
 ├── vectordb.py          # Vector database (FAISS)
-├── ingest.py            # ZIM file processing pipeline
+├── ingest.py            # Single ZIM file processing
+├── multi_ingest.py      # Multiple ZIM file processing
 ├── chunker.py           # Text chunking algorithm
 ├── utils.py             # Utility functions
 ├── requirements.txt     # Python dependencies
 ├── API.md              # API documentation
+├── TUNINGS.md          # Tunings feature guide
 └── README.md           # This file
 ```
 

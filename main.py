@@ -3,29 +3,47 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from uuid import uuid4
 from ingest import run_ingestion
+from multi_ingest import run_multi_ingest
 from embedder import Embedder
 from vectordb import VectorDB
 from config import load_config, set_config_value, get_config_value
 from conversations import create_conversation, add_message, get_conversation_history
 from ai_client import AIClient
+from tunings import (
+    init_tunings,
+    get_all_tunings,
+    get_tuning,
+    get_active_tuning,
+    set_active_tuning,
+    create_custom_tuning,
+    delete_custom_tuning,
+    get_tuning_with_installation_status,
+)
+from zim_downloader import (
+    list_installed_files,
+    is_file_installed,
+    get_tuning_installation_status,
+)
 
-# -------- Global State --------
+
 class AppState:
     def __init__(self):
         self.embedder = None
         self.db = None
         self.db_loaded = False
         self.ai_client = AIClient()
+        self.active_tuning = None
+
 
 app_state = AppState()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: initialize embedder model
     app_state.embedder = Embedder()
+    init_tunings()
+    app_state.active_tuning = get_active_tuning()
     yield
-    # Shutdown: cleanup
     app_state.embedder = None
     app_state.db = None
 
@@ -37,10 +55,21 @@ app = FastAPI(
 )
 
 
-# -------- Request Models --------
 class IngestRequest(BaseModel):
     zim_path: str
     output_name: str = "zim_db"
+
+
+class MultiIngestRequest(BaseModel):
+    zim_paths: list
+    output_name: str = "combined_db"
+
+
+class CustomTuningRequest(BaseModel):
+    tuning_id: str
+    name: str
+    description: str
+    zim_paths: list
 
 
 class SearchRequest(BaseModel):
@@ -65,17 +94,18 @@ class ChatResponse(BaseModel):
     context: list
 
 
-# -------- GET: Health Check --------
 @app.get("/health")
 def health_check():
     return {
         "status": "ok",
         "db_loaded": app_state.db_loaded,
         "ai_configured": app_state.ai_client.is_configured(),
+        "active_tuning": app_state.active_tuning["id"]
+        if app_state.active_tuning
+        else None,
     }
 
 
-# -------- GET: Config Status --------
 @app.get("/config")
 def get_config():
     config = load_config()
@@ -87,14 +117,12 @@ def get_config():
     }
 
 
-# -------- POST: Set AI Endpoint --------
 @app.post("/config/set-ai-endpoint")
 def set_ai_endpoint(req: ConfigRequest):
     try:
         set_config_value("ai_endpoint", req.ai_endpoint)
         set_config_value("ai_model", req.ai_model)
         app_state.ai_client.update_config(req.ai_endpoint, req.ai_model)
-
         return {
             "status": "configured",
             "ai_endpoint": req.ai_endpoint,
@@ -104,7 +132,167 @@ def set_ai_endpoint(req: ConfigRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -------- POST: Ingest ZIM File --------
+@app.get("/tunings")
+def list_tunings():
+    all_tunings = get_all_tunings()
+    return {
+        "tunings": {
+            tuning_id: {
+                "name": tuning["name"],
+                "description": tuning["description"],
+                "category": tuning["category"],
+                "file_count": len(tuning.get("zim_files", [])),
+            }
+            for tuning_id, tuning in all_tunings.items()
+        },
+        "active": app_state.active_tuning["id"]
+        if app_state.active_tuning
+        else None,
+    }
+
+
+@app.get("/tunings/{tuning_id}")
+def get_tuning_details(tuning_id: str):
+    tuning = get_tuning_with_installation_status(tuning_id)
+    if not tuning:
+        raise HTTPException(status_code=404, detail=f"Tuning '{tuning_id}' not found")
+    
+    response = {
+        "id": tuning_id,
+        "name": tuning["name"],
+        "description": tuning["description"],
+        "category": tuning["category"],
+    }
+    
+    # Include installation status for preset tunings
+    if tuning.get("category") == "preset":
+        response["files"] = tuning.get("files_with_status", tuning.get("zim_files", []))
+    else:
+        response["zim_files"] = tuning.get("zim_files", [])
+    
+    return response
+
+
+@app.post("/tunings/{tuning_id}/ingest")
+def ingest_tuning(tuning_id: str, zim_file_indices: list = None):
+    tuning = get_tuning(tuning_id)
+    if not tuning:
+        raise HTTPException(status_code=404, detail=f"Tuning '{tuning_id}' not found")
+
+    try:
+        zim_files = tuning.get("zim_files", [])
+
+        if zim_file_indices:
+            selected_files = [
+                zim_files[i] for i in zim_file_indices if i < len(zim_files)
+            ]
+        else:
+            selected_files = zim_files
+
+        zim_paths = []
+        for file_info in selected_files:
+            if "path" in file_info:
+                zim_paths.append(file_info["path"])
+            elif "url" in file_info:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Remote file not supported. Please download first.",
+                )
+
+        if not zim_paths:
+            raise HTTPException(status_code=400, detail="No local ZIM files found")
+
+        db_name = f"{tuning_id}_db"
+        result = run_multi_ingest(zim_paths, db_name)
+
+        set_active_tuning(tuning_id)
+        app_state.active_tuning = {"id": tuning_id, "tuning": tuning}
+
+        return {**result, "tuning_id": tuning_id, "db_name": db_name}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/tunings/custom/create")
+def create_tuning(req: CustomTuningRequest):
+    try:
+        create_custom_tuning(
+            req.tuning_id, req.name, req.description, req.zim_paths
+        )
+        return {
+            "status": "created",
+            "tuning_id": req.tuning_id,
+            "name": req.name,
+            "file_count": len(req.zim_paths),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/tunings/custom/{tuning_id}")
+def delete_tuning(tuning_id: str):
+    if delete_custom_tuning(tuning_id):
+        if app_state.active_tuning and app_state.active_tuning["id"] == tuning_id:
+            app_state.active_tuning = None
+        return {"status": "deleted", "tuning_id": tuning_id}
+    else:
+        raise HTTPException(status_code=404, detail="Tuning not found or is preset")
+
+
+@app.get("/zim/installed")
+def list_installed_zim():
+    """List all installed ZIM files."""
+    installed = list_installed_files()
+    return {
+        "installed_files": {
+            file_id: {
+                "title": info["title"],
+                "size": info["size"],
+                "path": info["path"],
+            }
+            for file_id, info in installed.items()
+        },
+        "count": len(installed),
+    }
+
+
+@app.get("/zim/status/{tuning_id}")
+def get_zim_installation_status(tuning_id: str):
+    """Get ZIM installation status for a tuning."""
+    status = get_tuning_installation_status(tuning_id)
+    if "error" in status:
+        raise HTTPException(status_code=404, detail=status["error"])
+    return status
+
+
+@app.get("/zim/available")
+def list_available_zim():
+    """List all available ZIM files for download."""
+    from zim_downloader import list_available_files
+    
+    available = list_available_files()
+    result = {}
+    
+    for tuning_id, files in available.items():
+        result[tuning_id] = {
+            "files": [
+                {
+                    "id": f["id"],
+                    "name": f["name"],
+                    "description": f["description"],
+                    "size": f["size"],
+                    "installed": is_file_installed(f["id"]),
+                }
+                for f in files
+            ]
+        }
+    
+    return result
+
+
 @app.post("/ingest")
 def ingest(req: IngestRequest):
     try:
@@ -114,7 +302,15 @@ def ingest(req: IngestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -------- GET: Load Vector Database --------
+@app.post("/ingest-multiple")
+def ingest_multiple(req: MultiIngestRequest):
+    try:
+        result = run_multi_ingest(req.zim_paths, req.output_name)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/load")
 def load_db(name: str = "zim_db"):
     try:
@@ -128,7 +324,6 @@ def load_db(name: str = "zim_db"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -------- POST: Search Context --------
 @app.post("/search")
 def search(req: SearchRequest):
     if not app_state.db_loaded or app_state.db is None:
@@ -137,14 +332,12 @@ def search(req: SearchRequest):
     try:
         query_embedding = app_state.embedder.encode([req.query])[0]
         results = app_state.db.search(query_embedding, req.top_k)
-
         return {"query": req.query, "results": results}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -------- POST: Chat with AI --------
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     if not app_state.ai_client.is_configured():
@@ -157,24 +350,19 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="DB not loaded. Call /load first.")
 
     try:
-        # Generate conversation ID if not provided
         conversation_id = req.conversation_id or str(uuid4())
 
-        # Ensure conversation exists
         try:
             get_conversation_history(conversation_id)
         except Exception:
             create_conversation(conversation_id)
 
-        # Get context from vector database
         context_size = get_config_value("context_size")
         query_embedding = app_state.embedder.encode([req.message])[0]
         context = app_state.db.search(query_embedding, context_size)
 
-        # Get AI response with context
         ai_response = app_state.ai_client.chat(req.message, context)
 
-        # Store messages in conversation history
         context_str = "\n".join(context) if context else None
         add_message(conversation_id, "user", req.message, context_str)
         add_message(conversation_id, "assistant", ai_response)
@@ -194,7 +382,6 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -------- GET: Conversation History --------
 @app.get("/conversation/{conversation_id}")
 def get_conversation(conversation_id: str):
     try:

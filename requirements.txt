@@ -7,3 +7,4 @@ faiss-cpu>=1.7.4
 tqdm>=4.66.1
 numpy>=1.24.3
 requests>=2.31.0
+python-multipart>=0.0.7

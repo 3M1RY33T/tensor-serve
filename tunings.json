@@ -1,0 +1,105 @@
+{
+  "active": null,
+  "presets": {
+    "research": {
+      "name": "Research",
+      "description": "Academic and encyclopedic content for research",
+      "category": "preset",
+      "file_ids": [
+        "wikipedia_en",
+        "wikisource_en",
+        "wikinews_en"
+      ],
+      "zim_files": [
+        {
+          "id": "wikipedia_en",
+          "name": "Wikipedia",
+          "description": "The free encyclopedia",
+          "size": "~20GB"
+        },
+        {
+          "id": "wikisource_en",
+          "name": "Wikisource",
+          "description": "Free library of texts",
+          "size": "~5GB"
+        },
+        {
+          "id": "wikinews_en",
+          "name": "Wikinews",
+          "description": "Free news source",
+          "size": "~2GB"
+        }
+      ]
+    },
+    "learn": {
+      "name": "Learn",
+      "description": "Educational and textbook content",
+      "category": "preset",
+      "file_ids": [
+        "libretexts",
+        "wikiversity_en"
+      ],
+      "zim_files": [
+        {
+          "id": "libretexts",
+          "name": "LibreTexts",
+          "description": "Open-source textbooks and courses",
+          "size": "~15GB"
+        },
+        {
+          "id": "wikiversity_en",
+          "name": "Wikiversity",
+          "description": "Free learning environment",
+          "size": "~3GB"
+        }
+      ]
+    },
+    "literature": {
+      "name": "Literature",
+      "description": "Books and literary works",
+      "category": "preset",
+      "file_ids": [
+        "gutenberg",
+        "wikibooks_en"
+      ],
+      "zim_files": [
+        {
+          "id": "gutenberg",
+          "name": "Project Gutenberg",
+          "description": "Over 70,000 free ebooks",
+          "size": "~25GB"
+        },
+        {
+          "id": "wikibooks_en",
+          "name": "Wikibooks",
+          "description": "Free textbooks and manuals",
+          "size": "~3GB"
+        }
+      ]
+    },
+    "coding": {
+      "name": "Coding",
+      "description": "Developer documentation and resources",
+      "category": "preset",
+      "file_ids": [
+        "devdocs",
+        "stack_exchange"
+      ],
+      "zim_files": [
+        {
+          "id": "devdocs",
+          "name": "DevDocs",
+          "description": "API documentation aggregator",
+          "size": "~5GB"
+        },
+        {
+          "id": "stack_exchange",
+          "name": "Stack Exchange",
+          "description": "Q&A from Stack Overflow and related",
+          "size": "~10GB"
+        }
+      ]
+    }
+  },
+  "custom": {}
+}
