@@ -3,3 +3,5 @@
 /__pycache__
 coding_db.index
 *.pkl
+/__pycache__
+.DS_Store
