@@ -219,21 +219,40 @@ def list_installed_files() -> Dict:
 
 
 def is_file_installed(file_id: str) -> bool:
-    """Return True if the file is recorded in the manifest and exists on disk."""
+    """Return True if the file is recorded in the manifest and exists on disk.
+
+    For the virtual 'devdocs_all' bundle, returns True as soon as at least one
+    individual devdocs entry has been downloaded (no network call required).
+    """
     installed = list_installed_files()
+    if file_id == "devdocs_all":
+        return any(k.startswith("devdocs_en_") for k in installed)
     return file_id in installed and os.path.exists(installed[file_id]["path"])
 
 
-def get_installed_files_for_tuning(tuning_id: str) -> List[str]:
-    """Return disk paths of installed files for a specific tuning."""
-    if tuning_id not in PRESET_FILES:
+def _count_installed_devdocs() -> int:
+    """Return the number of devdocs_en_* entries present in the manifest."""
+    return sum(1 for k in list_installed_files() if k.startswith("devdocs_en_"))
+
+
+def get_installed_files_for_preset(preset_id: str) -> List[str]:
+    """Return disk paths of installed files for a specific preset.
+
+    For the virtual 'devdocs_all' bundle, expands to the individual paths of
+    every devdocs_en_* entry present in the manifest.
+    """
+    if preset_id not in PRESET_FILES:
         return []
 
     installed = list_installed_files()
     result = []
-    for file_info in PRESET_FILES[tuning_id]:
+    for file_info in PRESET_FILES[preset_id]:
         file_id = file_info["id"]
-        if is_file_installed(file_id):
+        if file_id == "devdocs_all":
+            for k, v in installed.items():
+                if k.startswith("devdocs_en_") and os.path.exists(v["path"]):
+                    result.append(v["path"])
+        elif is_file_installed(file_id):
             result.append(installed[file_id]["path"])
     return result
 
@@ -378,34 +397,38 @@ def uninstall_file(file_id: str) -> bool:
         return False
 
 
-def get_tuning_installation_status(tuning_id: str) -> Dict:
-    """Return installation status for every file in a tuning preset."""
-    if tuning_id not in PRESET_FILES:
+def get_preset_installation_status(preset_id: str) -> Dict:
+    """Return installation status for every file in a preset."""
+    if preset_id not in PRESET_FILES:
         return {
-            "error": f"Unknown tuning: '{tuning_id}'. "
+            "error": f"Unknown preset: '{preset_id}'. "
             f"Valid options: {', '.join(PRESET_FILES)}"
         }
 
     installed_map = list_installed_files()
     files_status = []
 
-    for file_info in PRESET_FILES[tuning_id]:
+    for file_info in PRESET_FILES[preset_id]:
         file_id = file_info["id"]
         installed = is_file_installed(file_id)
-        files_status.append(
-            {
-                "id": file_id,
-                "name": file_info["name"],
-                "description": file_info["description"],
-                "size": file_info["size"],
-                "installed": installed,
-                "path": installed_map.get(file_id, {}).get("path")
-                if installed
-                else None,
-            }
-        )
 
-    return {"tuning": tuning_id, "files": files_status}
+        entry = {
+            "id": file_id,
+            "name": file_info["name"],
+            "description": file_info["description"],
+            "size": file_info["size"],
+            "installed": installed,
+            "path": installed_map.get(file_id, {}).get("path") if installed else None,
+        }
+
+        if file_id == "devdocs_all":
+            count = _count_installed_devdocs()
+            entry["installed_count"] = count
+            entry["path"] = None
+
+        files_status.append(entry)
+
+    return {"preset": preset_id, "files": files_status}
 
 
 def list_devdocs_catalog() -> List[Dict]:

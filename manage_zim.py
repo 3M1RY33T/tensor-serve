@@ -5,10 +5,10 @@ Tensor Serve ZIM File Manager CLI
 Usage:
     python manage_zim.py list                    # List available preset files
     python manage_zim.py status                  # Show installation status
-    python manage_zim.py status <tuning>         # Status for specific tuning
+    python manage_zim.py status <preset>         # Status for specific preset
     python manage_zim.py install <file_id>       # Install a file by ID
     python manage_zim.py uninstall <file_id>     # Uninstall a file
-    python manage_zim.py install-tuning <tuning> # Interactive install for tuning
+    python manage_zim.py install-preset <preset> # Interactive install for preset
     python manage_zim.py install-devdocs         # Install devdocs from full catalog
 """
 
@@ -20,8 +20,8 @@ import questionary
 from zim_downloader import (
     bytes_to_human,
     download_file,
-    get_installed_files_for_tuning,
-    get_tuning_installation_status,
+    get_installed_files_for_preset,
+    get_preset_installation_status,
     is_file_installed,
     list_available_files,
     list_devdocs_catalog,
@@ -31,15 +31,15 @@ from zim_downloader import (
 
 
 def print_available():
-    """Print available preset files grouped by tuning."""
+    """Print available preset files grouped by preset."""
     available = list_available_files()
 
     print("\n" + "=" * 80)
     print("AVAILABLE ZIM FILES FOR TENSOR SERVE".center(80))
     print("=" * 80)
 
-    for tuning_id, files in available.items():
-        print(f"\n📚 {tuning_id.upper()}")
+    for preset_id, files in available.items():
+        print(f"\n📚 {preset_id.upper()}")
         print("-" * 80)
         for file_info in files:
             print(f"  ID:          {file_info['id']}")
@@ -49,16 +49,16 @@ def print_available():
             print()
 
 
-def print_status(tuning_id=None):
+def print_status(preset_id=None):
     """Print installation status."""
-    if tuning_id:
-        status = get_tuning_installation_status(tuning_id)
+    if preset_id:
+        status = get_preset_installation_status(preset_id)
         if "error" in status:
             print(f"✗ {status['error']}")
             return
 
         print(f"\n{'=' * 80}")
-        print(f"Installation Status: {tuning_id.upper()}".center(80))
+        print(f"Installation Status: {preset_id.upper()}".center(80))
         print("=" * 80)
 
         for file in status["files"]:
@@ -66,7 +66,11 @@ def print_status(tuning_id=None):
             print(f"\n{icon} {file['name']} ({file['id']})")
             print(f"  Size: {file['size']}")
             if file["installed"]:
-                print(f"  Path: {file['path']}")
+                if "installed_count" in file:
+                    count = file["installed_count"]
+                    print(f"  Installed: {count} entr{'y' if count == 1 else 'ies'}")
+                elif file.get("path"):
+                    print(f"  Path: {file['path']}")
     else:
         installed = list_installed_files()
         print(f"\n{'=' * 80}")
@@ -85,22 +89,22 @@ def print_status(tuning_id=None):
             print(f"  Path: {info['path']}")
 
 
-def interactive_install_tuning(tuning_id):
-    """Interactively install files for a tuning."""
-    status = get_tuning_installation_status(tuning_id)
+def interactive_install_preset(preset_id):
+    """Interactively install files for a preset."""
+    status = get_preset_installation_status(preset_id)
 
     if "error" in status:
         print(f"✗ {status['error']}")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"INSTALL {tuning_id.upper()} TUNING".center(80))
+    print(f"INSTALL {preset_id.upper()} PRESET".center(80))
     print("=" * 80)
 
     uninstalled = [f for f in status["files"] if not f["installed"]]
 
     if not uninstalled:
-        print(f"\n✓ All files for '{tuning_id}' are already installed!")
+        print(f"\n✓ All files for '{preset_id}' are already installed!")
         return
 
     choices = [
@@ -140,14 +144,12 @@ def interactive_install_devdocs():
         print("✗ Could not fetch devdocs catalog. Check your internet connection.")
         return
 
-    # Split into installed / uninstalled
     for entry in catalog:
         entry["installed"] = is_file_installed(entry["id"])
 
     installed = [e for e in catalog if e["installed"]]
     uninstalled = [e for e in catalog if not e["installed"]]
 
-    # ── summary ──────────────────────────────────────────────────────────────
     total_bytes = sum(e["size_bytes"] for e in uninstalled)
     print(f"\n  Total entries : {len(catalog)}")
     print(f"  Installed     : {len(installed)}")
@@ -159,7 +161,6 @@ def interactive_install_devdocs():
         print("\n✓ All devdocs entries are already installed!")
         return
 
-    # ── checkbox selection ────────────────────────────────────────────────────
     choices = [
         questionary.Choice(
             title=f"{e['name']:<40}  {e['size']:>10}",
@@ -177,7 +178,6 @@ def interactive_install_devdocs():
         print("No files selected.")
         return
 
-    # ── download ─────────────────────────────────────────────────────────────
     selected_bytes = sum(e["size_bytes"] for e in selected)
     print(
         f"\nInstalling {len(selected)} devdocs file(s)  ({bytes_to_human(selected_bytes)} total)...\n"
@@ -191,7 +191,6 @@ def interactive_install_devdocs():
             failed.append(entry["name"])
         print()
 
-    # ── final report ─────────────────────────────────────────────────────────
     installed_count = len(selected) - len(failed)
     print("─" * 60)
     print(f"✓ Installed : {installed_count}")
@@ -216,9 +215,9 @@ def main():
     # Status command
     status_parser = subparsers.add_parser("status", help="Show installation status")
     status_parser.add_argument(
-        "tuning",
+        "preset",
         nargs="?",
-        help="Specific tuning to check (research, learn, literature, coding)",
+        help="Specific preset to check (research, learn, literature, coding)",
     )
 
     # Install command
@@ -229,13 +228,13 @@ def main():
     uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall a ZIM file")
     uninstall_parser.add_argument("file_id", help="File ID to uninstall")
 
-    # Install tuning command
-    install_tuning_parser = subparsers.add_parser(
-        "install-tuning", help="Interactively install preset files for a tuning"
+    # Install preset command
+    install_preset_parser = subparsers.add_parser(
+        "install-preset", help="Interactively install files for a preset"
     )
-    install_tuning_parser.add_argument(
-        "tuning",
-        help="Tuning ID (research, learn, literature, coding)",
+    install_preset_parser.add_argument(
+        "preset",
+        help="Preset ID (research, learn, literature, coding)",
     )
 
     # Install devdocs command
@@ -254,7 +253,7 @@ def main():
         print_available()
 
     elif args.command == "status":
-        print_status(args.tuning)
+        print_status(args.preset)
 
     elif args.command == "install":
         if download_file(args.file_id):
@@ -268,8 +267,8 @@ def main():
         else:
             sys.exit(1)
 
-    elif args.command == "install-tuning":
-        interactive_install_tuning(args.tuning)
+    elif args.command == "install-preset":
+        interactive_install_preset(args.preset)
 
     elif args.command == "install-devdocs":
         interactive_install_devdocs()

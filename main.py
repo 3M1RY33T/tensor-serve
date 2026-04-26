@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
@@ -10,20 +11,20 @@ from conversations import add_message, create_conversation, get_conversation_his
 from embedder import Embedder
 from ingest import run_ingestion
 from multi_ingest import run_multi_ingest
-from tunings import (
-    create_custom_tuning,
-    delete_custom_tuning,
-    get_active_tuning,
-    get_all_tunings,
-    get_tuning,
-    get_tuning_with_installation_status,
-    init_tunings,
-    set_active_tuning,
+from presets import (
+    create_custom_preset,
+    delete_custom_preset,
+    get_active_preset,
+    get_all_presets,
+    get_preset,
+    get_preset_with_installation_status,
+    init_presets,
+    set_active_preset,
 )
 from vectordb import VectorDB
 from zim_downloader import (
     bytes_to_human,
-    get_tuning_installation_status,
+    get_preset_installation_status,
     is_file_installed,
     list_installed_files,
 )
@@ -35,7 +36,7 @@ class AppState:
         self.db = None
         self.db_loaded = False
         self.ai_client = AIClient()
-        self.active_tuning = None
+        self.active_preset = None
 
 
 app_state = AppState()
@@ -44,8 +45,22 @@ app_state = AppState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app_state.embedder = Embedder()
-    init_tunings()
-    app_state.active_tuning = get_active_tuning()
+    init_presets()
+    app_state.active_preset = get_active_preset()
+
+    # Auto-load the active preset's database if it was already ingested
+    if app_state.active_preset:
+        preset_id = app_state.active_preset["id"]
+        db_name = f"{preset_id}_db"
+        if os.path.exists(f"{db_name}.index") and os.path.exists(f"{db_name}.pkl"):
+            try:
+                app_state.db = VectorDB(dim=384)
+                app_state.db.load(db_name)
+                app_state.db_loaded = True
+                print(f"[startup] Auto-loaded database: {db_name}")
+            except Exception as e:
+                print(f"[startup] Warning: could not auto-load '{db_name}': {e}")
+
     yield
     app_state.embedder = None
     app_state.db = None
@@ -68,8 +83,8 @@ class MultiIngestRequest(BaseModel):
     output_name: str = "combined_db"
 
 
-class CustomTuningRequest(BaseModel):
-    tuning_id: str
+class CustomPresetRequest(BaseModel):
+    preset_id: str
     name: str
     description: str
     zim_paths: list
@@ -107,8 +122,8 @@ def health_check():
         "status": "ok",
         "db_loaded": app_state.db_loaded,
         "ai_configured": app_state.ai_client.is_configured(),
-        "active_tuning": app_state.active_tuning["id"]
-        if app_state.active_tuning
+        "active_preset": app_state.active_preset["id"]
+        if app_state.active_preset
         else None,
     }
 
@@ -139,81 +154,84 @@ def set_ai_endpoint(req: ConfigRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/tunings")
-def list_tunings():
-    all_tunings = get_all_tunings()
+@app.get("/presets")
+def list_presets():
+    all_presets = get_all_presets()
     return {
-        "tunings": {
-            tuning_id: {
-                "name": tuning["name"],
-                "description": tuning["description"],
-                "category": tuning["category"],
-                "file_count": len(tuning.get("zim_files", [])),
+        "presets": {
+            preset_id: {
+                "name": preset["name"],
+                "description": preset["description"],
+                "category": preset["category"],
+                "file_count": len(preset.get("zim_files", [])),
             }
-            for tuning_id, tuning in all_tunings.items()
+            for preset_id, preset in all_presets.items()
         },
-        "active": app_state.active_tuning["id"] if app_state.active_tuning else None,
+        "active": app_state.active_preset["id"] if app_state.active_preset else None,
     }
 
 
-@app.get("/tunings/{tuning_id}")
-def get_tuning_details(tuning_id: str):
-    tuning = get_tuning_with_installation_status(tuning_id)
-    if not tuning:
-        raise HTTPException(status_code=404, detail=f"Tuning '{tuning_id}' not found")
+@app.get("/presets/{preset_id}")
+def get_preset_details(preset_id: str):
+    preset = get_preset_with_installation_status(preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
 
     response = {
-        "id": tuning_id,
-        "name": tuning["name"],
-        "description": tuning["description"],
-        "category": tuning["category"],
+        "id": preset_id,
+        "name": preset["name"],
+        "description": preset["description"],
+        "category": preset["category"],
     }
 
-    # Include installation status for preset tunings
-    if tuning.get("category") == "preset":
-        response["files"] = tuning.get("files_with_status", tuning.get("zim_files", []))
+    if preset.get("category") == "preset":
+        response["files"] = preset.get("files_with_status", preset.get("zim_files", []))
     else:
-        response["zim_files"] = tuning.get("zim_files", [])
+        response["zim_files"] = preset.get("zim_files", [])
 
     return response
 
 
-@app.post("/tunings/{tuning_id}/ingest")
-def ingest_tuning(tuning_id: str, zim_file_indices: list = None):
-    tuning = get_tuning(tuning_id)
-    if not tuning:
-        raise HTTPException(status_code=404, detail=f"Tuning '{tuning_id}' not found")
+@app.post("/presets/{preset_id}/ingest")
+def ingest_preset(preset_id: str, zim_file_indices: list = None):
+    preset = get_preset(preset_id)
+    if not preset:
+        raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
 
     try:
-        zim_files = tuning.get("zim_files", [])
+        if preset.get("category") == "preset":
+            # For built-in presets, resolve paths from the manifest via
+            # zim_downloader so that updated IDs (e.g. devdocs_all) are
+            # honoured instead of the stale IDs stored in presets.py.
+            from zim_downloader import get_installed_files_for_preset as _get_paths
 
-        if zim_file_indices:
-            selected_files = [
-                zim_files[i] for i in zim_file_indices if i < len(zim_files)
-            ]
+            zim_paths = _get_paths(preset_id)
         else:
-            selected_files = zim_files
-
-        zim_paths = []
-        for file_info in selected_files:
-            if "path" in file_info:
-                zim_paths.append(file_info["path"])
-            elif "url" in file_info:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Remote file not supported. Please download first.",
-                )
+            # Custom presets store absolute paths directly in the definition.
+            zim_files = preset.get("zim_files", [])
+            if zim_file_indices:
+                zim_files = [
+                    zim_files[i] for i in zim_file_indices if i < len(zim_files)
+                ]
+            zim_paths = [f["path"] for f in zim_files if "path" in f]
 
         if not zim_paths:
-            raise HTTPException(status_code=400, detail="No local ZIM files found")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No installed ZIM files found for preset '{preset_id}'. "
+                    "Install files first with: python manage_zim.py install-preset "
+                    f"{preset_id}"
+                ),
+            )
 
-        db_name = f"{tuning_id}_db"
+        db_name = f"{preset_id}_db"
         result = run_multi_ingest(zim_paths, db_name)
 
-        set_active_tuning(tuning_id)
-        app_state.active_tuning = {"id": tuning_id, "tuning": tuning}
+        set_active_preset(preset_id)
+        app_state.active_preset = {"id": preset_id, "preset": preset}
 
-        return {**result, "tuning_id": tuning_id, "db_name": db_name}
+        return {**result, "preset_id": preset_id, "db_name": db_name}
 
     except HTTPException:
         raise
@@ -221,13 +239,13 @@ def ingest_tuning(tuning_id: str, zim_file_indices: list = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/tunings/custom/create")
-def create_tuning(req: CustomTuningRequest):
+@app.post("/presets/custom/create")
+def create_preset(req: CustomPresetRequest):
     try:
-        create_custom_tuning(req.tuning_id, req.name, req.description, req.zim_paths)
+        create_custom_preset(req.preset_id, req.name, req.description, req.zim_paths)
         return {
             "status": "created",
-            "tuning_id": req.tuning_id,
+            "preset_id": req.preset_id,
             "name": req.name,
             "file_count": len(req.zim_paths),
         }
@@ -235,14 +253,16 @@ def create_tuning(req: CustomTuningRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/tunings/custom/{tuning_id}")
-def delete_tuning(tuning_id: str):
-    if delete_custom_tuning(tuning_id):
-        if app_state.active_tuning and app_state.active_tuning["id"] == tuning_id:
-            app_state.active_tuning = None
-        return {"status": "deleted", "tuning_id": tuning_id}
+@app.delete("/presets/custom/{preset_id}")
+def delete_preset(preset_id: str):
+    if delete_custom_preset(preset_id):
+        if app_state.active_preset and app_state.active_preset["id"] == preset_id:
+            app_state.active_preset = None
+        return {"status": "deleted", "preset_id": preset_id}
     else:
-        raise HTTPException(status_code=404, detail="Tuning not found or is preset")
+        raise HTTPException(
+            status_code=404, detail="Preset not found or is a built-in preset"
+        )
 
 
 @app.get("/zim/installed")
@@ -262,10 +282,10 @@ def list_installed_zim():
     }
 
 
-@app.get("/zim/status/{tuning_id}")
-def get_zim_installation_status(tuning_id: str):
-    """Get ZIM installation status for a tuning."""
-    status = get_tuning_installation_status(tuning_id)
+@app.get("/zim/status/{preset_id}")
+def get_zim_installation_status(preset_id: str):
+    """Get ZIM installation status for a preset."""
+    status = get_preset_installation_status(preset_id)
     if "error" in status:
         raise HTTPException(status_code=404, detail=status["error"])
     return status
@@ -279,8 +299,8 @@ def list_available_zim():
     available = list_available_files()
     result = {}
 
-    for tuning_id, files in available.items():
-        result[tuning_id] = {
+    for preset_id, files in available.items():
+        result[preset_id] = {
             "files": [
                 {
                     "id": f["id"],
