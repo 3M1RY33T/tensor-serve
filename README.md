@@ -1,245 +1,114 @@
-# Tensor Serve
+What Tensor Serve does
 
-A backend service that enables locally-run AI models to work with offline web content. Tensor Serve processes ZIM files (from Kiwix), creates semantic embeddings, and provides an AI-powered interface for retrieving context and generating responses.
+Tensor Serve is an **offline-first AI backend**. It downloads documentation and knowledge bases as ZIM files, builds a local semantic vector database from them, and uses that database to give an AI model relevant context when answering questions — all without sending your data to the internet.
 
-## Features
+---
 
-- 🔗 **Independent Backend**: Works standalone without requiring the web GUI
-- 📚 **ZIM File Processing**: Ingest offline Wikipedia and other Kiwix content
-- 💾 **ZIM File Manager**: Download and manage ZIM files from terminal
-- 🎯 **AI Tunings**: Pre-configured collections (Research, Learn, Literature, Coding, Custom)
-- 🧠 **Semantic Search**: Uses embeddings to find relevant context
-- 💬 **Conversational AI**: Chat interface with context-aware responses
-- 💾 **Conversation History**: Track and retrieve past conversations
-- ⚙️ **Persistent Configuration**: Save AI endpoint settings
-- 🚀 **Production Ready**: FastAPI with proper error handling and validation
+## 1. ZIM File Manager CLI (`manage_zim.py`)
 
-## Architecture
+The command-line tool for managing your local knowledge base files.
 
-```
-User/Frontend
-    ↓
-[Tensor Serve API]
-    ├─ Config Manager (config.json)
-    ├─ Vector DB (FAISS + embeddings)
-    ├─ Embedder (sentence-transformers)
-    ├─ Conversation DB (SQLite)
-    └─ AI Client (calls local LLM)
+```/dev/null/shell.sh#L1-7
+python manage_zim.py list                       # List all available preset files and their sizes
+python manage_zim.py status                     # Show all installed ZIM files
+python manage_zim.py status <preset>            # Show install status for one preset (research, learn, literature, coding)
+python manage_zim.py install <file_id>          # Download a specific file by its Kiwix ID
+python manage_zim.py uninstall <file_id>        # Remove a file and its manifest entry
+python manage_zim.py install-preset <preset>    # Interactive checkbox picker for a preset's files
+python manage_zim.py install-devdocs            # Interactive checkbox picker for all 231 DevDocs entries
 ```
 
-## Installation
+- Downloads come from the **live Kiwix OPDS catalog** — always up to date
+- Prefers **text-only (`nopic`) flavours** automatically to keep sizes small
+- Downloads show a **live progress bar** (`████░░ 45.2%  210 MB / 465 MB`)
+- Tracks all installed files in `zim_manifest.json`
 
-### Requirements
-- Python 3.8+
-- Local LLM endpoint (e.g., Ollama, vLLM, text-generation-webui)
-- ZIM files from Kiwix (optional)
+---
 
-### Setup
+## 2. REST API (`main.py`)
 
-```bash
-# Clone and navigate to directory
-cd tensor-serve
+Start the server with: `uvicorn main:app --host 0.0.0.0 --port 8000`
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+Interactive docs available at `http://localhost:8000/docs`
 
-# Install dependencies
-pip install -r requirements.txt
-```
+### Health & Configuration
+| Method | Endpoint | What it does |
+|---|---|---|
+| `GET` | `/health` | Server status, whether DB is loaded, active preset |
+| `GET` | `/config` | View current AI endpoint, model, and settings |
+| `POST` | `/config/set-ai-endpoint` | Point the server at a local LLM (Ollama, vLLM, etc.) |
 
-## Quick Start
+### Presets
+| Method | Endpoint | What it does |
+|---|---|---|
+| `GET` | `/presets` | List all presets (built-in + custom) and which is active |
+| `GET` | `/presets/{preset_id}` | Details and file installation status for one preset |
+| `POST` | `/presets/{preset_id}/ingest` | Process a preset's ZIM files into a vector database |
+| `POST` | `/presets/custom/create` | Create a custom preset from your own ZIM file paths |
+| `DELETE` | `/presets/custom/{preset_id}` | Delete a custom preset |
 
-### 1. Install ZIM Files (First Time Only)
-```bash
-# List available files
-python manage_zim.py list
+### ZIM File Management
+| Method | Endpoint | What it does |
+|---|---|---|
+| `GET` | `/zim/available` | List all preset files with installed/not-installed status |
+| `GET` | `/zim/installed` | List every installed ZIM file with path and size |
+| `GET` | `/zim/status/{preset_id}` | Per-file install status for a preset |
+| `GET` | `/zim/devdocs` | Live catalog of all 231 DevDocs entries from Kiwix |
+| `POST` | `/zim/devdocs/install` | Queue DevDocs downloads in the background (specific IDs or all) |
 
-# Install files interactively
-python manage_zim.py install-tuning research
+### Vector Database
+| Method | Endpoint | What it does |
+|---|---|---|
+| `POST` | `/ingest` | Ingest a single ZIM file into a named vector DB |
+| `POST` | `/ingest-multiple` | Ingest multiple ZIM files into one combined vector DB |
+| `GET` | `/load?name=<db>` | Load a previously ingested database into memory |
+| `POST` | `/search` | Semantic search — returns the top-k most relevant text chunks |
 
-# Check status
-python manage_zim.py status research
-```
+### Chat & Conversations
+| Method | Endpoint | What it does |
+|---|---|---|
+| `POST` | `/chat` | Send a message; get a context-grounded AI response |
+| `GET` | `/conversation/{id}` | Retrieve the full history of a conversation |
 
-### 2. Start Tensor Serve
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
+---
 
-### 3. Configure AI Endpoint
-```bash
-curl -X POST http://localhost:8000/config/set-ai-endpoint \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ai_endpoint": "http://localhost:11434",
-    "ai_model": "mistral"
-  }'
-```
+## 3. Built-in Presets
 
-### 4. Ingest Tuning
-```bash
-# Ingest the Research tuning
-curl -X POST http://localhost:8000/tunings/research/ingest
-```
+Four curated knowledge bases, each automatically selecting text-only ZIM variants:
 
-### 5. Load Database and Chat
-```bash
-# Load the database
-curl -X GET "http://localhost:8000/load?name=research_db"
+| Preset | Contents | Approx. size |
+|---|---|---|
+| `research` | Wikipedia, Wikisource, Wikinews | ~65 GB |
+| `learn` | Wikiversity, Wikibooks | ~5 GB |
+| `literature` | Project Gutenberg, Wikibooks | ~63 GB |
+| `coding` | Stack Overflow, All DevDocs (231 entries) | ~80 GB + ~588 MB |
 
-# Start chatting
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "What is machine learning?"
-  }'
-```
+---
 
-See [ZIM_MANAGER.md](./ZIM_MANAGER.md) for ZIM file management!
-See [TUNINGS.md](./TUNINGS.md) for detailed tuning guide!
-See [API.md](./API.md) for complete API documentation.
+## 4. How the AI pipeline works
 
-## Project Structure
+1. **Download** — ZIM files fetched from Kiwix and stored in `zim_files/`
+2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS
+3. **Auto-load** — On server startup, the last active preset's database is loaded automatically
+4. **Chat** — User message is embedded → top-k similar chunks retrieved → chunks + message sent to the local LLM → response returned with the source context included
 
-```
-tensor-serve/
-├── main.py              # FastAPI application and routes
-├── config.py            # Configuration management
-├── conversations.py     # Conversation history (SQLite)
-├── tunings.py           # AI model tunings (presets + custom)
-├── ai_client.py         # AI endpoint communication
-├── embedder.py          # Embedding model (sentence-transformers)
-├── vectordb.py          # Vector database (FAISS)
-├── ingest.py            # Single ZIM file processing
-├── multi_ingest.py      # Multiple ZIM file processing
-├── chunker.py           # Text chunking algorithm
-├── utils.py             # Utility functions
-├── requirements.txt     # Python dependencies
-├── API.md              # API documentation
-├── TUNINGS.md          # Tunings feature guide
-└── README.md           # This file
-```
+---
 
-## Configuration
+## 5. Key files
 
-Settings are stored in `config.json`:
-
-```json
-{
-  "ai_endpoint": "http://localhost:11434",
-  "ai_model": "mistral",
-  "context_size": 3,
-  "max_conversation_history": 20
-}
-```
-
-### Settings Explained
-- **ai_endpoint**: URL where local LLM is running
-- **ai_model**: Name of the model to use
-- **context_size**: Number of relevant text chunks to retrieve
-- **max_conversation_history**: Maximum messages per conversation
-
-## Data Flow
-
-### Ingestion Pipeline
-1. **Extract**: Read articles from ZIM file
-2. **Clean**: Remove HTML tags and normalize text
-3. **Chunk**: Split text into overlapping chunks
-4. **Embed**: Convert chunks to semantic embeddings
-5. **Store**: Save FAISS index + text data
-
-### Chat Pipeline
-1. **Encode**: Convert user message to embedding
-2. **Search**: Find k most similar text chunks
-3. **Retrieve**: Get context from vector DB
-4. **Prompt**: Build prompt with context + message
-5. **Call**: Send to local AI endpoint
-6. **Store**: Save message and response to history
-7. **Return**: Send response to user
-
-## Performance Tips
-
-- **First load is slow**: Model downloads (~200MB) on first run
-- **Large ZIM files**: Can take 10-30 minutes to ingest depending on size
-- **Batch processing**: Uses 100-chunk batches to minimize memory usage
-- **FAISS indexing**: Creates `.index` and `.pkl` files for fast reloading
-- **Context window**: Adjust `context_size` based on your LLM's capabilities
-
-## Common Setups
-
-### With Ollama
-```bash
-# Install Ollama: https://ollama.ai
-# Run model
-ollama run mistral
-
-# Configure Tensor Serve
-curl -X POST http://localhost:8000/config/set-ai-endpoint \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ai_endpoint": "http://localhost:11434",
-    "ai_model": "mistral"
-  }'
-```
-
-### With vLLM
-```bash
-# Install vLLM
-pip install vllm
-
-# Run server
-python -m vllm.entrypoints.openai.api_server --model mistral-7b-instruct-v0.1
-
-# Configure
-curl -X POST http://localhost:8000/config/set-ai-endpoint \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ai_endpoint": "http://localhost:8000",
-    "ai_model": "mistral-7b-instruct-v0.1"
-  }'
-```
-
-## Troubleshooting
-
-### "DB not loaded" error
-- Call `/load` endpoint first: `GET /load?name=zim_db`
-- Check that `zim_db.index` and `zim_db.pkl` exist
-
-### "AI endpoint not configured" error
-- Call `/config/set-ai-endpoint` to configure
-- Verify AI endpoint is running and accessible
-
-### Ingest taking too long
-- Large ZIM files (>1GB) are normal
-- Check system resources (CPU, RAM, disk)
-- Process runs in batches, so you can check progress
-
-### Embedding model not found
-- First run downloads the embedding model (~200MB)
-- Requires internet connection for download
-- Model is cached locally after first run
-
-## API Endpoints Summary
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| GET | `/health` | Check server status |
-| GET | `/config` | Get current configuration |
-| POST | `/config/set-ai-endpoint` | Configure AI model |
-| POST | `/ingest` | Process ZIM file |
-| GET | `/load` | Load vector database |
-| POST | `/search` | Search for context |
-| POST | `/chat` | Chat with AI |
-| GET | `/conversation/{id}` | Get conversation history |
-
-## License
-
-MIT
-
-## Contributing
-
-Contributions welcome! Please ensure:
-- Python code passes syntax checks
-- API changes documented in API.md
-- No breaking changes to existing endpoints
+| File | Purpose |
+|---|---|
+| `main.py` | FastAPI application and all API routes |
+| `manage_zim.py` | CLI for downloading and managing ZIM files |
+| `presets.py` | Preset definitions and configuration persistence |
+| `zim_downloader.py` | Kiwix OPDS catalog interface and download engine |
+| `ingest.py` / `multi_ingest.py` | ZIM → vector database pipeline |
+| `embedder.py` | Sentence-transformer embeddings |
+| `vectordb.py` | FAISS index wrapper (save/load/search) |
+| `chunker.py` | 500-word overlapping text chunker |
+| `utils.py` | ZIM article iterator and HTML cleaner |
+| `ai_client.py` | HTTP client for the local LLM endpoint |
+| `conversations.py` | SQLite-backed conversation history |
+| `config.py` | Persistent JSON configuration |
+| `presets.json` | Saved preset state and active preset |
+| `zim_manifest.json` | Record of all installed ZIM files

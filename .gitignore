@@ -1,3 +1,5 @@
 /zim_files
 *.pyc
 /__pycache__
+coding_db.index
+*.pkl
