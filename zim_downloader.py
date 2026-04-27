@@ -34,6 +34,18 @@ PRESET_FILES = {
             "description": "Free-content news source – text only, no images",
             "size": "~100MB",
         },
+        {
+            "id": "mdwiki_en_all",
+            "name": "MDWiki Medical Encyclopedia",
+            "description": "Healthcare articles curated by WikiProjectMed (maxi – no text-only version available)",
+            "size": "~2.1GB",
+        },
+        {
+            "id": "wikivoyage_en_europe",
+            "name": "Wikivoyage – Europe",
+            "description": "Travel guide for European destinations – text only, no images (nopic flavour)",
+            "size": "~67MB",
+        },
     ],
     "learn": [
         {
@@ -62,6 +74,12 @@ PRESET_FILES = {
             "description": "Free textbooks and manuals – text only, no images",
             "size": "~3GB",
         },
+        {
+            "id": "gutenberg_en_lcc-pk",
+            "name": "Project Gutenberg – Indo-Iranian Languages",
+            "description": "Public-domain texts in Indo-Iranian languages and literatures",
+            "size": "~80MB",
+        },
     ],
     "coding": [
         {
@@ -69,6 +87,12 @@ PRESET_FILES = {
             "name": "Stack Overflow",
             "description": "Q&A for professional and enthusiast programmers (no text-only version available)",
             "size": "~80GB",
+        },
+        {
+            "id": "robotics.stackexchange.com_en_all",
+            "name": "Robotics Stack Exchange",
+            "description": "Q&A for everything related to robotics",
+            "size": "~233MB",
         },
         {
             "id": "devdocs_all",
@@ -240,30 +264,37 @@ def scan_zim_folder() -> Dict:
     * Auto-registers any .zim files found in ``zim_files/`` that are not yet
       tracked (e.g. files placed there manually or downloaded outside the tool).
 
+    All paths are stored and compared as absolute paths so the function works
+    correctly regardless of the process working directory.
+
     Returns the up-to-date installed dict (also saved to the manifest).
     """
-    if not os.path.isdir(ZIM_FOLDER):
+    zim_dir = os.path.abspath(ZIM_FOLDER)
+    if not os.path.isdir(zim_dir):
         return load_manifest().get("installed", {})
 
     manifest = load_manifest()
     installed = manifest.get("installed", {})
     changed = False
 
-    tracked_paths = {v["path"] for v in installed.values()}
+    # Normalise every existing manifest path to absolute for consistent comparison
+    tracked_paths = {os.path.abspath(v["path"]) for v in installed.values()}
 
     # 1. Purge stale entries — file was deleted from disk
     stale = [
-        fid for fid, info in list(installed.items()) if not os.path.exists(info["path"])
+        fid
+        for fid, info in list(installed.items())
+        if not os.path.exists(os.path.abspath(info["path"]))
     ]
     for fid in stale:
         del installed[fid]
         changed = True
 
     # 2. Register untracked .zim files found on disk
-    for fname in os.listdir(ZIM_FOLDER):
+    for fname in os.listdir(zim_dir):
         if not fname.endswith(".zim"):
             continue
-        fpath = os.path.join(ZIM_FOLDER, fname)
+        fpath = os.path.join(zim_dir, fname)  # always absolute
         if fpath in tracked_paths:
             continue
         stem = fname[:-4]  # strip .zim

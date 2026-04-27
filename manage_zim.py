@@ -16,6 +16,7 @@ Usage:
 import argparse
 import glob
 import os
+import shutil
 import sys
 
 import questionary
@@ -206,7 +207,46 @@ def interactive_install_devdocs():
 def clean_working_files():
     """Remove generated working files, preserving presets, config, and ZIM files."""
     print("\n" + "=" * 80)
-    print("CLEAN WORKING FILES".:
+    print("CLEAN WORKING FILES".center(80))
+    print("=" * 80)
+    print("\nThis will remove:")
+    print("  • Vector DB index files (*.index)")
+    print("  • Vector DB text stores (*.pkl)")
+    print("  • Conversation history (conversations.db)")
+    print("  • Python bytecode cache (__pycache__/)")
+    print("\nThis will NOT remove:")
+    print("  • presets.json, config.json, zim_manifest.json")
+    print("  • ZIM files in zim_files/\n")
+
+    confirm = questionary.confirm("Proceed with cleanup?").ask()
+    if not confirm:
+        print("Cancelled.")
+        return
+
+    removed = []
+
+    for pattern in ("*.index", "*.pkl"):
+        for path in sorted(glob.glob(pattern)):
+            os.remove(path)
+            removed.append(path)
+
+    if os.path.exists("conversations.db"):
+        os.remove("conversations.db")
+        removed.append("conversations.db")
+
+    if os.path.isdir("__pycache__"):
+        shutil.rmtree("__pycache__")
+        removed.append("__pycache__/")
+
+    if removed:
+        print(f"\n✓ Removed {len(removed)} item(s):")
+        for r in removed:
+            print(f"  • {r}")
+    else:
+        print("\n✓ Nothing to clean.")
+
+
+def main():
     parser = argparse.ArgumentParser(
         description="Tensor Serve ZIM File Manager",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -249,6 +289,12 @@ def clean_working_files():
         help="Browse and install devdocs entries from the full Kiwix catalog",
     )
 
+    # Clean command
+    subparsers.add_parser(
+        "clean",
+        help="Remove working files (*.index, *.pkl, conversations.db, __pycache__/)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -278,6 +324,9 @@ def clean_working_files():
 
     elif args.command == "install-devdocs":
         interactive_install_devdocs()
+
+    elif args.command == "clean":
+        clean_working_files()
 
 
 if __name__ == "__main__":

@@ -13,7 +13,13 @@ PRESETS = {
         "name": "Research",
         "description": "Academic and encyclopedic content for research",
         "category": "preset",
-        "file_ids": ["wikipedia_en_all", "wikisource_en_all", "wikinews_en_all"],
+        "file_ids": [
+            "wikipedia_en_all",
+            "wikisource_en_all",
+            "wikinews_en_all",
+            "mdwiki_en_all",
+            "wikivoyage_en_europe",
+        ],
         "zim_files": [
             {
                 "id": "wikipedia_en_all",
@@ -32,6 +38,18 @@ PRESETS = {
                 "name": "Wikinews",
                 "description": "Free-content news source – text only, no images",
                 "size": "~100MB",
+            },
+            {
+                "id": "mdwiki_en_all",
+                "name": "MDWiki Medical Encyclopedia",
+                "description": "Healthcare articles curated by WikiProjectMed (maxi – no text-only version available)",
+                "size": "~2.1GB",
+            },
+            {
+                "id": "wikivoyage_en_europe",
+                "name": "Wikivoyage – Europe",
+                "description": "Travel guide for European destinations – text only, no images (nopic flavour)",
+                "size": "~67MB",
             },
         ],
     },
@@ -59,7 +77,7 @@ PRESETS = {
         "name": "Literature",
         "description": "Books and literary works",
         "category": "preset",
-        "file_ids": ["gutenberg_en_all", "wikibooks_en_all"],
+        "file_ids": ["gutenberg_en_all", "wikibooks_en_all", "gutenberg_en_lcc-pk"],
         "zim_files": [
             {
                 "id": "gutenberg_en_all",
@@ -73,19 +91,35 @@ PRESETS = {
                 "description": "Free textbooks and manuals – text only, no images",
                 "size": "~3GB",
             },
+            {
+                "id": "gutenberg_en_lcc-pk",
+                "name": "Project Gutenberg – Indo-Iranian Languages",
+                "description": "Public-domain texts in Indo-Iranian languages and literatures",
+                "size": "~80MB",
+            },
         ],
     },
     "coding": {
         "name": "Coding",
         "description": "Developer documentation and resources",
         "category": "preset",
-        "file_ids": ["stackoverflow.com_en_all", "devdocs_all"],
+        "file_ids": [
+            "stackoverflow.com_en_all",
+            "robotics.stackexchange.com_en_all",
+            "devdocs_all",
+        ],
         "zim_files": [
             {
                 "id": "stackoverflow.com_en_all",
                 "name": "Stack Overflow",
                 "description": "Q&A for professional and enthusiast programmers (no text-only version available)",
                 "size": "~80GB",
+            },
+            {
+                "id": "robotics.stackexchange.com_en_all",
+                "name": "Robotics Stack Exchange",
+                "description": "Q&A for everything related to robotics",
+                "size": "~233MB",
             },
             {
                 "id": "devdocs_all",
