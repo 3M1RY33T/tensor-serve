@@ -1,6 +1,0 @@
-{
-  "ai_endpoint": "http://127.0.0.1:1234",
-  "ai_model": "local-model",
-  "context_size": 3,
-  "max_conversation_history": 20
-}
