@@ -10,9 +10,12 @@ Usage:
     python manage_zim.py uninstall <file_id>     # Uninstall a file
     python manage_zim.py install-preset <preset> # Interactive install for preset
     python manage_zim.py install-devdocs         # Install devdocs from full catalog
+    python manage_zim.py clean                   # Remove working files (vector DB, conversations)
 """
 
 import argparse
+import glob
+import os
 import sys
 
 import questionary
@@ -200,7 +203,10 @@ def interactive_install_devdocs():
             print(f"    • {name}")
 
 
-def main():
+def clean_working_files():
+    """Remove generated working files, preserving presets, config, and ZIM files."""
+    print("\n" + "=" * 80)
+    print("CLEAN WORKING FILES".:
     parser = argparse.ArgumentParser(
         description="Tensor Serve ZIM File Manager",
         formatter_class=argparse.RawDescriptionHelpFormatter,

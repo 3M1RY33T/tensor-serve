@@ -1,6 +1,6 @@
-What Tensor Serve does
+Tensor Serve
 
-Tensor Serve is an **offline-first AI backend**. It downloads documentation and knowledge bases as ZIM files, builds a local semantic vector database from them, and uses that database to give an AI model relevant context when answering questions — all without sending your data to the internet.
+Tensor Serve is an **offline-first AI backend**. It downloads documentation and knowledge bases as ZIM files, builds a local semantic vector database from them, and uses that database to give an AI model relevant context when answering questions — while keeping your data private.
 
 ---
 
@@ -70,6 +70,11 @@ Interactive docs available at `http://localhost:8000/docs`
 | `POST` | `/chat` | Send a message; get a context-grounded AI response |
 | `GET` | `/conversation/{id}` | Retrieve the full history of a conversation |
 
+### Cleanup
+| Method | Endpoint | What it does |
+|---|---|---|
+| `POST` | `/clean` | Delete all vector DB index files, text stores, conversation history, and `__pycache__/` — preserves presets, config, and ZIM files |
+
 ---
 
 ## 3. Built-in Presets
@@ -112,3 +117,77 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 | `config.py` | Persistent JSON configuration |
 | `presets.json` | Saved preset state and active preset |
 | `zim_manifest.json` | Record of all installed ZIM files
+
+---
+
+### Settings
+
+- **ai_endpoint**: URL of local LLM server (required for chat)
+- **ai_model**: Model name to use (required for chat)
+- **context_size**: Number of context chunks to retrieve (default: 3)
+- **max_conversation_history**: Maximum messages to track per conversation (default: 20)
+
+---
+
+## Architecture
+
+- **Embedder**: Uses `sentence-transformers` (all-MiniLM-L6-v2) for semantic embeddings
+- **Vector DB**: FAISS index for efficient similarity search
+- **AI Client**: HTTP client for communicating with local LLM endpoint
+- **Conversations**: SQLite database for tracking message history
+- **Config**: JSON file for persistent settings
+
+## Error Handling
+
+- **400**: Bad request (DB not loaded, AI not configured, invalid input)
+- **404**: Resource not found (database files missing)
+- **500**: Server error
+- **502**: AI endpoint unreachable or error
+
+## Performance Notes
+
+- Large ZIM files (>1GB) may take 10-30 minutes to ingest
+- Embeddings are cached in `.index` and `.pkl` files for fast reloading
+- Context retrieval is O(1) for similarity search
+- Chat responses depend on AI endpoint response time
+
+---
+
+## Workflow
+
+### Complete Example
+
+```bash
+# 1. Start the server
+uvicorn main:app --reload
+
+# 2. Configure AI endpoint (assuming Ollama running on port 11434)
+curl -X POST http://localhost:8000/config/set-ai-endpoint \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ai_endpoint": "http://localhost:11434",
+    "ai_model": "mistral"
+  }'
+
+# 3. Check health
+curl http://localhost:8000/health
+
+# 4. Ingest ZIM file
+curl -X POST http://localhost:8000/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "zim_path": "/data/wikipedia.zim",
+    "output_name": "wiki"
+  }'
+
+# 5. Load the database
+curl http://localhost:8000/load?name=wiki
+
+# 6. Start chatting
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Who invented the telephone?"}'
+
+# 7. Get conversation history
+curl http://localhost:8000/conversation/your-conversation-id
+```

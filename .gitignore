@@ -3,5 +3,9 @@
 /__pycache__
 coding_db.index
 *.pkl
-/__pycache__
+conversations.db
+.venv/
+zim_manifest.json
+presets.json
+config.json
 .DS_Store
