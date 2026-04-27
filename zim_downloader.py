@@ -81,6 +81,24 @@ PRESET_FILES = {
 
 
 # ---------------------------------------------------------------------------
+# Download progress tracking (in-memory, polled by the REST API)
+# ---------------------------------------------------------------------------
+
+# Maps file_id -> progress dict. Written by download_file(), read by the API.
+_download_progress: Dict[str, Dict] = {}
+
+
+def get_download_progress() -> Dict:
+    """Return a snapshot of all tracked downloads (active and recently finished)."""
+    return dict(_download_progress)
+
+
+def get_file_progress(file_id: str) -> Optional[Dict]:
+    """Return progress info for a single file_id, or None if not tracked."""
+    return _download_progress.get(file_id)
+
+
+# ---------------------------------------------------------------------------
 # Manifest helpers
 # ---------------------------------------------------------------------------
 
@@ -116,11 +134,12 @@ def save_manifest(manifest: Dict):
 
 def bytes_to_human(num_bytes: int) -> str:
     """Convert a byte count to a human-readable size string."""
+    value: float = float(num_bytes)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if abs(num_bytes) < 1024.0:
-            return f"{num_bytes:.1f} {unit}"
-        num_bytes /= 1024.0
-    return f"{num_bytes:.1f} PB"
+        if abs(value) < 1024.0:
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{value:.1f} PB"
 
 
 def _find_text(element: ET.Element, tag: str) -> str:
@@ -213,9 +232,62 @@ def list_available_files() -> Dict[str, List[Dict]]:
     return PRESET_FILES
 
 
+def scan_zim_folder() -> Dict:
+    """
+    Reconcile the manifest with what is actually on disk.
+
+    * Removes manifest entries whose .zim file no longer exists on disk.
+    * Auto-registers any .zim files found in ``zim_files/`` that are not yet
+      tracked (e.g. files placed there manually or downloaded outside the tool).
+
+    Returns the up-to-date installed dict (also saved to the manifest).
+    """
+    if not os.path.isdir(ZIM_FOLDER):
+        return load_manifest().get("installed", {})
+
+    manifest = load_manifest()
+    installed = manifest.get("installed", {})
+    changed = False
+
+    tracked_paths = {v["path"] for v in installed.values()}
+
+    # 1. Purge stale entries — file was deleted from disk
+    stale = [
+        fid for fid, info in list(installed.items()) if not os.path.exists(info["path"])
+    ]
+    for fid in stale:
+        del installed[fid]
+        changed = True
+
+    # 2. Register untracked .zim files found on disk
+    for fname in os.listdir(ZIM_FOLDER):
+        if not fname.endswith(".zim"):
+            continue
+        fpath = os.path.join(ZIM_FOLDER, fname)
+        if fpath in tracked_paths:
+            continue
+        stem = fname[:-4]  # strip .zim
+        size_bytes = os.path.getsize(fpath)
+        installed[stem] = {
+            "path": fpath,
+            "title": stem,
+            "size": bytes_to_human(size_bytes),
+            "installed_at": os.path.getmtime(fpath),
+            "untracked": True,
+        }
+        tracked_paths.add(fpath)
+        changed = True
+
+    if changed:
+        manifest["installed"] = installed
+        save_manifest(manifest)
+
+    return installed
+
+
 def list_installed_files() -> Dict:
-    """Return all installed ZIM files from the manifest."""
-    return load_manifest().get("installed", {})
+    """Return all installed ZIM files, including any untracked files found on disk."""
+    return scan_zim_folder()
 
 
 def is_file_installed(file_id: str) -> bool:
@@ -289,14 +361,31 @@ def download_file(file_id: str, show_progress: bool = True) -> bool:
         print(
             f"Installing {len(to_install)} DevDocs entries ({bytes_to_human(total_bytes)})...\n"
         )
+        _download_progress["devdocs_all"] = {
+            "status": "downloading",
+            "title": "All DevDocs",
+            "total_files": len(to_install),
+            "completed_files": 0,
+            "failed_files": 0,
+            "total_bytes": total_bytes,
+            "total": bytes_to_human(total_bytes),
+        }
 
         success = True
         for i, entry in enumerate(to_install, 1):
             print(f"[{i}/{len(to_install)}] {entry['name']}")
             ok = download_file(entry["id"], show_progress=show_progress)
-            if not ok:
+            if ok:
+                _download_progress["devdocs_all"]["completed_files"] = i
+            else:
                 success = False
+                _download_progress["devdocs_all"]["failed_files"] = (
+                    _download_progress["devdocs_all"].get("failed_files", 0) + 1
+                )
             print()
+        _download_progress["devdocs_all"]["status"] = (
+            "completed" if success else "partial"
+        )
         return success
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -332,12 +421,29 @@ def download_file(file_id: str, show_progress: bool = True) -> bool:
 
         total_size = int(response.headers.get("content-length", 0))
         downloaded = 0
+        _download_progress[file_id] = {
+            "status": "downloading",
+            "title": file_info["title"],
+            "downloaded_bytes": 0,
+            "total_bytes": total_size,
+            "percent": 0.0,
+            "downloaded": "0 B",
+            "total": file_info["size"],
+        }
 
         with open(filepath, "wb") as f:
             for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1 MB chunks
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
+                    _pct = (downloaded / total_size * 100) if total_size > 0 else 0.0
+                    _download_progress[file_id].update(
+                        {
+                            "downloaded_bytes": downloaded,
+                            "percent": round(_pct, 1),
+                            "downloaded": bytes_to_human(downloaded),
+                        }
+                    )
                     if show_progress and total_size > 0:
                         percent = (downloaded / total_size) * 100
                         bar_len = 40
@@ -363,6 +469,7 @@ def download_file(file_id: str, show_progress: bool = True) -> bool:
             "installed_at": Path(filepath).stat().st_mtime,
         }
         save_manifest(manifest)
+        _download_progress[file_id]["status"] = "completed"
 
         print(f"✓ Successfully installed: {filepath}")
         return True
@@ -371,6 +478,11 @@ def download_file(file_id: str, show_progress: bool = True) -> bool:
         print(f"\n✗ Download failed: {e}")
         if os.path.exists(filepath):
             os.remove(filepath)
+        _download_progress[file_id] = {
+            "status": "error",
+            "error": str(e),
+            "file_id": file_id,
+        }
         return False
 
 

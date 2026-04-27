@@ -2,6 +2,7 @@ import glob
 import os
 import shutil
 from contextlib import asynccontextmanager
+from typing import Optional
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -99,7 +100,14 @@ class SearchRequest(BaseModel):
 
 class ConfigRequest(BaseModel):
     ai_endpoint: str
-    ai_model: str
+    ai_model: Optional[str] = None
+
+
+class UpdateConfigRequest(BaseModel):
+    ai_endpoint: Optional[str] = None
+    ai_model: Optional[str] = None
+    context_size: Optional[int] = None
+    max_conversation_history: Optional[int] = None
 
 
 class ChatRequest(BaseModel):
@@ -109,6 +117,15 @@ class ChatRequest(BaseModel):
 
 class DevdocsInstallRequest(BaseModel):
     file_ids: list = []  # if empty, all uninstalled devdocs entries are queued
+
+
+class ZimInstallRequest(BaseModel):
+    file_ids: list  # one or more Kiwix file IDs to download
+
+
+class ZimInstallPresetRequest(BaseModel):
+    preset_id: str
+    file_ids: list = []  # specific IDs from the preset; empty = all uninstalled
 
 
 class ChatResponse(BaseModel):
@@ -144,16 +161,113 @@ def get_config():
 @app.post("/config/set-ai-endpoint")
 def set_ai_endpoint(req: ConfigRequest):
     try:
+        ai_model = req.ai_model
+        auto_detected = False
+        all_models = []
+
+        if not ai_model:
+            from ai_client import AIClient as _AIClient
+
+            all_models = _AIClient.list_models(req.ai_endpoint)
+            if not all_models:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Endpoint reachable but returned no models.",
+                )
+            ai_model = all_models[0]["id"]
+            auto_detected = True
+
         set_config_value("ai_endpoint", req.ai_endpoint)
-        set_config_value("ai_model", req.ai_model)
-        app_state.ai_client.update_config(req.ai_endpoint, req.ai_model)
-        return {
+        set_config_value("ai_model", ai_model)
+        app_state.ai_client.update_config(req.ai_endpoint, ai_model)
+
+        response = {
             "status": "configured",
             "ai_endpoint": req.ai_endpoint,
-            "ai_model": req.ai_model,
+            "ai_model": ai_model,
+            "auto_detected": auto_detected,
         }
+        if auto_detected and len(all_models) > 1:
+            response["available_models"] = [m["id"] for m in all_models]
+            response["note"] = (
+                "Multiple models found — first one was selected. "
+                "Use PATCH /config to switch to a different model."
+            )
+        return response
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/models")
+def list_available_models(endpoint: Optional[str] = None):
+    """
+    List models available at the AI endpoint.
+
+    Uses the currently configured endpoint by default. Pass an optional
+    ``?endpoint=<url>`` query parameter to probe a different URL without
+    saving it — useful for previewing models before calling
+    ``POST /config/set-ai-endpoint``.
+    """
+    from ai_client import AIClient as _AIClient
+
+    target = endpoint or app_state.ai_client.endpoint
+    if not target:
+        raise HTTPException(
+            status_code=400,
+            detail="No endpoint configured. Provide ?endpoint=<url> or call /config/set-ai-endpoint first.",
+        )
+
+    try:
+        models = _AIClient.list_models(target)
+        return {
+            "endpoint": target,
+            "models": [m["id"] for m in models],
+            "count": len(models),
+            "source": models[0]["source"] if models else None,
+        }
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.patch("/config")
+def update_config(req: UpdateConfigRequest):
+    """
+    Update one or more configuration settings.
+
+    All fields are optional — only the fields you provide will be changed.
+    If ai_endpoint or ai_model are updated the live AI client is refreshed
+    immediately without requiring a server restart.
+    """
+    updates = req.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+
+    for key, value in updates.items():
+        set_config_value(key, value)
+
+    # Keep the live AI client in sync if connection settings changed
+    if "ai_endpoint" in updates or "ai_model" in updates:
+        config = load_config()
+        app_state.ai_client.update_config(
+            config.get("ai_endpoint"),
+            config.get("ai_model"),
+        )
+
+    config = load_config()
+    return {
+        "status": "updated",
+        "updated_fields": list(updates.keys()),
+        "config": {
+            "ai_endpoint": config.get("ai_endpoint"),
+            "ai_model": config.get("ai_model"),
+            "context_size": config.get("context_size", 3),
+            "max_conversation_history": config.get("max_conversation_history", 20),
+        },
+    }
 
 
 @app.get("/presets")
@@ -499,7 +613,8 @@ def chat(req: ChatRequest):
 @app.get("/conversation/{conversation_id}")
 def get_conversation(conversation_id: str):
     try:
-        history = get_conversation_history(conversation_id)
+        limit = get_config_value("max_conversation_history") or 20
+        history = get_conversation_history(conversation_id, limit=limit)
         return {"conversation_id": conversation_id, "messages": history}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -561,3 +676,157 @@ def clean_working_files():
         "removed_count": len(removed),
         "errors": errors,
     }
+
+
+@app.post("/zim/install")
+def install_zim(req: ZimInstallRequest, background_tasks: BackgroundTasks):
+    """
+    Queue one or more ZIM files for background download.
+
+    Provide a list of Kiwix file IDs (e.g. ``["devdocs_en_python", "devdocs_en_rust"]``).
+    Use ``GET /zim/progress`` to track download status after queuing.
+    """
+    from zim_downloader import download_file as _dl
+
+    queued = []
+    already_installed = []
+
+    for file_id in req.file_ids:
+        if is_file_installed(file_id):
+            already_installed.append(file_id)
+        else:
+            background_tasks.add_task(_dl, file_id, False)
+            queued.append(file_id)
+
+    return {
+        "status": "queued" if queued else "nothing_to_do",
+        "queued": queued,
+        "queued_count": len(queued),
+        "already_installed": already_installed,
+    }
+
+
+@app.post("/zim/install-preset")
+def install_preset_zim(req: ZimInstallPresetRequest, background_tasks: BackgroundTasks):
+    """
+    Queue ZIM downloads for a preset's files.
+
+    Pass specific ``file_ids`` to install only a subset of the preset's files.
+    Leave ``file_ids`` empty to queue every uninstalled file in the preset.
+
+    This is the API equivalent of:
+    ``python manage_zim.py install-preset <preset>``
+    """
+    from zim_downloader import PRESET_FILES
+    from zim_downloader import download_file as _dl
+
+    if req.preset_id not in PRESET_FILES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Preset '{req.preset_id}' not found. "
+            f"Valid options: {', '.join(PRESET_FILES)}",
+        )
+
+    preset_files = PRESET_FILES[req.preset_id]
+
+    if req.file_ids:
+        valid_ids = {f["id"] for f in preset_files}
+        invalid = [fid for fid in req.file_ids if fid not in valid_ids]
+        if invalid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File IDs not part of preset '{req.preset_id}': {invalid}",
+            )
+        to_check = [f for f in preset_files if f["id"] in req.file_ids]
+    else:
+        to_check = preset_files
+
+    queued = []
+    already_installed = []
+
+    for f in to_check:
+        if is_file_installed(f["id"]):
+            already_installed.append(f["id"])
+        else:
+            background_tasks.add_task(_dl, f["id"], False)
+            queued.append(f["id"])
+
+    return {
+        "status": "queued" if queued else "nothing_to_do",
+        "preset_id": req.preset_id,
+        "queued": queued,
+        "queued_count": len(queued),
+        "already_installed": already_installed,
+    }
+
+
+@app.delete("/zim/uninstall/{file_id}")
+def uninstall_zim(file_id: str):
+    """
+    Remove an installed ZIM file from disk and from the manifest.
+
+    This is the API equivalent of:
+    ``python manage_zim.py uninstall <file_id>``
+    """
+    from zim_downloader import uninstall_file as _uninstall
+
+    if not is_file_installed(file_id):
+        raise HTTPException(
+            status_code=404, detail=f"File '{file_id}' is not installed"
+        )
+
+    success = _uninstall(file_id)
+    if success:
+        return {"status": "uninstalled", "file_id": file_id}
+    raise HTTPException(status_code=500, detail=f"Failed to uninstall '{file_id}'")
+
+
+@app.get("/zim/progress")
+def get_zim_progress():
+    """
+    Get download progress for all active and recently completed downloads.
+
+    Poll this endpoint while downloads are running to show a progress bar
+    in a web GUI. Each entry contains at minimum a ``status`` field
+    (``downloading`` | ``completed`` | ``partial`` | ``error`` | ``already_installed``).
+
+    Active file downloads also include:
+    - ``percent``          – 0.0–100.0
+    - ``downloaded``       – human-readable bytes received (e.g. ``"210.3 MB"``)
+    - ``total``            – human-readable total size
+    - ``downloaded_bytes`` – raw bytes received
+    - ``total_bytes``      – raw total bytes
+
+    The ``devdocs_all`` bundle entry additionally includes:
+    - ``completed_files``  – number of individual entries finished
+    - ``total_files``      – total number of entries being installed
+    """
+    from zim_downloader import get_download_progress
+
+    progress = get_download_progress()
+    active = sum(1 for p in progress.values() if p.get("status") == "downloading")
+    return {
+        "active_downloads": active,
+        "total_tracked": len(progress),
+        "downloads": progress,
+    }
+
+
+@app.get("/zim/progress/{file_id}")
+def get_zim_file_progress(file_id: str):
+    """
+    Get download progress for a specific file by its Kiwix ID.
+
+    Returns 404 if no download has been started for this file in the
+    current server session.
+    """
+    from zim_downloader import get_file_progress
+
+    progress = get_file_progress(file_id)
+    if progress is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No download record for '{file_id}' in this session. "
+            "Start a download with POST /zim/install first.",
+        )
+    return {"file_id": file_id, **progress}

@@ -36,7 +36,9 @@ Interactive docs available at `http://localhost:8000/docs`
 |---|---|---|
 | `GET` | `/health` | Server status, whether DB is loaded, active preset |
 | `GET` | `/config` | View current AI endpoint, model, and settings |
-| `POST` | `/config/set-ai-endpoint` | Point the server at a local LLM (Ollama, vLLM, etc.) |
+| `GET` | `/config/models` | List models available at the configured endpoint (or `?endpoint=<url>` to probe any URL) |
+| `POST` | `/config/set-ai-endpoint` | Set `ai_endpoint` and optionally `ai_model` (auto-detected if omitted) |
+| `PATCH` | `/config` | Update any combination of the four settings (all fields optional) |
 
 ### Presets
 | Method | Endpoint | What it does |
@@ -51,10 +53,15 @@ Interactive docs available at `http://localhost:8000/docs`
 | Method | Endpoint | What it does |
 |---|---|---|
 | `GET` | `/zim/available` | List all preset files with installed/not-installed status |
-| `GET` | `/zim/installed` | List every installed ZIM file with path and size |
+| `GET` | `/zim/installed` | List every installed ZIM file with path and size (scans disk, auto-registers untracked files) |
 | `GET` | `/zim/status/{preset_id}` | Per-file install status for a preset |
+| `POST` | `/zim/install` | Queue one or more ZIM files for background download by Kiwix ID |
+| `POST` | `/zim/install-preset` | Queue all (or selected) files from a preset for background download |
+| `DELETE` | `/zim/uninstall/{file_id}` | Remove a ZIM file from disk and the manifest |
 | `GET` | `/zim/devdocs` | Live catalog of all 231 DevDocs entries from Kiwix |
 | `POST` | `/zim/devdocs/install` | Queue DevDocs downloads in the background (specific IDs or all) |
+| `GET` | `/zim/progress` | Poll aggregate progress for all active and recent downloads |
+| `GET` | `/zim/progress/{file_id}` | Poll download progress for a single file by Kiwix ID |
 
 ### Vector Database
 | Method | Endpoint | What it does |
@@ -69,6 +76,21 @@ Interactive docs available at `http://localhost:8000/docs`
 |---|---|---|
 | `POST` | `/chat` | Send a message; get a context-grounded AI response |
 | `GET` | `/conversation/{id}` | Retrieve the full history of a conversation |
+
+#### Download progress fields
+
+When a file is actively downloading, `GET /zim/progress/{file_id}` returns:
+
+| Field | Description |
+|---|---|
+| `status` | `downloading` \| `completed` \| `partial` \| `error` \| `already_installed` |
+| `percent` | `0.0` – `100.0` |
+| `downloaded` | Human-readable bytes received (e.g. `"210.3 MB"`) |
+| `total` | Human-readable total size |
+| `downloaded_bytes` | Raw bytes received |
+| `total_bytes` | Raw total bytes (0 if server did not send `Content-Length`) |
+
+The `devdocs_all` bundle entry additionally includes `completed_files` and `total_files` so a GUI can show per-entry progress.
 
 ### Cleanup
 | Method | Endpoint | What it does |
@@ -122,10 +144,52 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 
 ### Settings
 
-- **ai_endpoint**: URL of local LLM server (required for chat)
-- **ai_model**: Model name to use (required for chat)
-- **context_size**: Number of context chunks to retrieve (default: 3)
-- **max_conversation_history**: Maximum messages to track per conversation (default: 20)
+All four settings are readable via `GET /config` and writable via `PATCH /config`.
+`ai_endpoint` and `ai_model` can also be set together with `POST /config/set-ai-endpoint`.
+
+| Setting | Default | What it controls |
+|---|---|---|
+| `ai_endpoint` | `null` | URL of local LLM server (required for `/chat`) |
+| `ai_model` | `null` | Model name passed to the LLM (required for `/chat`) |
+| `context_size` | `3` | Number of vector DB chunks retrieved as context per chat message |
+| `max_conversation_history` | `20` | Maximum messages returned by `GET /conversation/{id}` |
+
+#### Model auto-detection
+
+`ai_model` does not need to be set manually. The server can discover available models by querying the endpoint directly — it tries the OpenAI-compatible `GET /v1/models` route first (vLLM, LM Studio, LocalAI, etc.), then falls back to Ollama's `GET /api/tags`.
+
+**Example — list models before configuring:**
+```bash
+curl "http://localhost:8000/config/models?endpoint=http://localhost:11434"
+```
+
+**Example — set endpoint and auto-detect model:**
+```bash
+# Omit ai_model entirely — the first available model is selected automatically.
+# If multiple models are found, the response lists all of them so you can switch with PATCH /config.
+curl -X POST http://localhost:8000/config/set-ai-endpoint \
+  -H "Content-Type: application/json" \
+  -d '{"ai_endpoint": "http://localhost:11434"}'
+```
+
+**Example — change only context size:**
+```bash
+curl -X PATCH http://localhost:8000/config \
+  -H "Content-Type: application/json" \
+  -d '{"context_size": 5}'
+```
+
+**Example — change all settings at once:**
+```bash
+curl -X PATCH http://localhost:8000/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ai_endpoint": "http://localhost:11434",
+    "ai_model": "llama3",
+    "context_size": 5,
+    "max_conversation_history": 50
+  }'
+```
 
 ---
 
