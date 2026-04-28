@@ -3,6 +3,7 @@
 /__pycache__
 *.index
 *.pkl
+*.bm25
 conversations.db
 .venv/
 zim_manifest.json

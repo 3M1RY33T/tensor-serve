@@ -1,8 +1,11 @@
 from tqdm import tqdm
-from utils import iterate_articles, clean_text
+
+from bm25_index import BM25Index
 from chunker import chunk_text
 from embedder import Embedder
+from utils import clean_text, iterate_articles
 from vectordb import VectorDB
+
 
 def run_ingestion(zim_path: str, output_name="zim_db"):
     embedder = Embedder()
@@ -43,5 +46,10 @@ def run_ingestion(zim_path: str, output_name="zim_db"):
         raise ValueError("No valid content found in ZIM file")
 
     db.save(output_name)
+
+    # Build and save BM25 keyword index alongside the FAISS index
+    bm25 = BM25Index()
+    bm25.build(db.texts)
+    bm25.save(output_name)
 
     return {"status": "completed", "output": output_name}

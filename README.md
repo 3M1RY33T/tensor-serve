@@ -69,7 +69,7 @@ Interactive docs available at `http://localhost:8000/docs`
 | `POST` | `/ingest` | Ingest a single ZIM file into a named vector DB |
 | `POST` | `/ingest-multiple` | Ingest multiple ZIM files into one combined vector DB |
 | `GET` | `/load?name=<db>` | Load a previously ingested database into memory |
-| `POST` | `/search` | Semantic search — returns the top-k most relevant text chunks |
+| `POST` | `/search` | Hybrid search (FAISS + BM25 via RRF) — returns top-k chunks; response includes `search_mode` |
 
 ### Chat & Conversations
 | Method | Endpoint | What it does |
@@ -115,9 +115,21 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 ## 4. How the AI pipeline works
 
 1. **Download** — ZIM files fetched from Kiwix and stored in `zim_files/`
-2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS
-3. **Auto-load** — On server startup, the last active preset's database is loaded automatically
-4. **Chat** — User message is embedded → top-k similar chunks retrieved → chunks + message sent to the local LLM → response returned with the source context included
+2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
+3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
+4. **Chat** — User message is embedded → hybrid search (FAISS + BM25 via RRF) retrieves top-k chunks → chunks + message sent to the local LLM → response returned with source context included
+
+### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
+
+Every search and chat request runs **two retrievals in parallel** and merges them:
+
+| | FAISS (semantic) | BM25 (keyword) |
+|---|---|---|
+| Finds | Conceptually related chunks | Exact term / token matches |
+| Good for | *"How does backpressure work?"* | *"asyncio.gather"*, error codes, API names |
+| Index file | `{name}.index` + `{name}.pkl` | `{name}.bm25` |
+
+Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in both lists float to the top. The pipeline degrades gracefully — if only one index is available it is used alone.
 
 ---
 
@@ -129,16 +141,18 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 | `manage_zim.py` | CLI for downloading and managing ZIM files |
 | `presets.py` | Preset definitions and configuration persistence |
 | `zim_downloader.py` | Kiwix OPDS catalog interface and download engine |
-| `ingest.py` / `multi_ingest.py` | ZIM → vector database pipeline |
+| `ingest.py` / `multi_ingest.py` | ZIM → vector database pipeline (FAISS + BM25) |
 | `embedder.py` | Sentence-transformer embeddings |
-| `vectordb.py` | FAISS index wrapper (save/load/search) |
+| `vectordb.py` | FAISS index wrapper (save/load/search/search_indices) |
+| `bm25_index.py` | BM25 keyword index wrapper (save/load/search_indices) |
+| `hybrid_search.py` | Reciprocal Rank Fusion — merges FAISS and BM25 results |
 | `chunker.py` | 500-word overlapping text chunker |
 | `utils.py` | ZIM article iterator and HTML cleaner |
 | `ai_client.py` | HTTP client for the local LLM endpoint |
 | `conversations.py` | SQLite-backed conversation history |
 | `config.py` | Persistent JSON configuration |
 | `presets.json` | Saved preset state and active preset |
-| `zim_manifest.json` | Record of all installed ZIM files
+| `zim_manifest.json` | Record of all installed ZIM files |
 
 ---
 
@@ -197,6 +211,8 @@ curl -X PATCH http://localhost:8000/config \
 
 - **Embedder**: Uses `sentence-transformers` (all-MiniLM-L6-v2) for semantic embeddings
 - **Vector DB**: FAISS index for efficient similarity search
+- **BM25 Index**: `rank-bm25` keyword index built from the same text chunks as FAISS
+- **Hybrid Search**: Reciprocal Rank Fusion merges FAISS and BM25 ranked lists — no tuning required
 - **AI Client**: HTTP client for communicating with local LLM endpoint
 - **Conversations**: SQLite database for tracking message history
 - **Config**: JSON file for persistent settings
@@ -211,9 +227,11 @@ curl -X PATCH http://localhost:8000/config \
 ## Performance Notes
 
 - Large ZIM files (>1GB) may take 10-30 minutes to ingest
-- Embeddings are cached in `.index` and `.pkl` files for fast reloading
-- Context retrieval is O(1) for similarity search
+- Both FAISS (`.index` + `.pkl`) and BM25 (`.bm25`) indexes are saved to disk and reloaded on startup — no re-ingestion needed
+- FAISS similarity search is O(1); BM25 scoring is O(n) but extremely fast in practice
+- Hybrid RRF adds negligible overhead — both searches run in milliseconds
 - Chat responses depend on AI endpoint response time
+- Existing databases ingested before hybrid search was added will use semantic-only search until re-ingested (no `.bm25` file present → graceful fallback)
 
 ---
 

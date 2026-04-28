@@ -212,6 +212,7 @@ def clean_working_files():
     print("\nThis will remove:")
     print("  • Vector DB index files (*.index)")
     print("  • Vector DB text stores (*.pkl)")
+    print("  • BM25 keyword index files (*.bm25)")
     print("  • Conversation history (conversations.db)")
     print("  • Python bytecode cache (__pycache__/)")
     print("\nThis will NOT remove:")
@@ -225,7 +226,7 @@ def clean_working_files():
 
     removed = []
 
-    for pattern in ("*.index", "*.pkl"):
+    for pattern in ("*.index", "*.pkl", "*.bm25"):
         for path in sorted(glob.glob(pattern)):
             os.remove(path)
             removed.append(path)

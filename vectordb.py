@@ -1,7 +1,9 @@
+import os
+import pickle
+
 import faiss
 import numpy as np
-import pickle
-import os
+
 
 class VectorDB:
     def __init__(self, dim):
@@ -21,12 +23,12 @@ class VectorDB:
     def load(self, path="db"):
         index_path = f"{path}.index"
         pkl_path = f"{path}.pkl"
-        
+
         if not os.path.exists(index_path):
             raise FileNotFoundError(f"Vector index not found: {index_path}")
         if not os.path.exists(pkl_path):
             raise FileNotFoundError(f"Text data not found: {pkl_path}")
-        
+
         self.index = faiss.read_index(index_path)
         with open(pkl_path, "rb") as f:
             self.texts = pickle.load(f)
@@ -42,3 +44,10 @@ class VectorDB:
                 results.append(self.texts[idx])
 
         return results
+
+    def search_indices(self, query_embedding, top_k=5):
+        """Return chunk indices ranked by FAISS similarity (best first)."""
+        distances, indices = self.index.search(
+            np.array([query_embedding]).astype("float32"), top_k
+        )
+        return [int(idx) for idx in indices[0] if 0 <= idx < len(self.texts)]

@@ -1,19 +1,22 @@
+from typing import List
+
 from tqdm import tqdm
-from utils import iterate_articles, clean_text
+
+from bm25_index import BM25Index
 from chunker import chunk_text
 from embedder import Embedder
+from utils import clean_text, iterate_articles
 from vectordb import VectorDB
-from typing import List
 
 
 def run_multi_ingest(zim_paths: List[str], output_name="combined_db"):
     """
     Ingest multiple ZIM files into a single vector database.
-    
+
     Args:
         zim_paths: List of paths to ZIM files
         output_name: Name of the output database
-        
+
     Returns:
         Dictionary with ingestion status
     """
@@ -68,6 +71,11 @@ def run_multi_ingest(zim_paths: List[str], output_name="combined_db"):
         raise ValueError("No valid content found in any ZIM files")
 
     db.save(output_name)
+
+    # Build and save BM25 keyword index alongside the FAISS index
+    bm25 = BM25Index()
+    bm25.build(db.texts)
+    bm25.save(output_name)
 
     return {
         "status": "completed",

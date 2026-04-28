@@ -37,6 +37,7 @@ class AppState:
     def __init__(self):
         self.embedder = None
         self.db = None
+        self.bm25 = None
         self.db_loaded = False
         self.ai_client = AIClient()
         self.active_preset = None
@@ -60,13 +61,26 @@ async def lifespan(app: FastAPI):
                 app_state.db = VectorDB(dim=384)
                 app_state.db.load(db_name)
                 app_state.db_loaded = True
-                print(f"[startup] Auto-loaded database: {db_name}")
+                print(f"[startup] Auto-loaded FAISS database: {db_name}")
             except Exception as e:
                 print(f"[startup] Warning: could not auto-load '{db_name}': {e}")
+
+            # Also load BM25 index if present (graceful — not required)
+            bm25_path = f"{db_name}.bm25"
+            if os.path.exists(bm25_path):
+                try:
+                    from bm25_index import BM25Index
+
+                    app_state.bm25 = BM25Index()
+                    app_state.bm25.load(db_name)
+                    print(f"[startup] Auto-loaded BM25 index: {bm25_path}")
+                except Exception as e:
+                    print(f"[startup] Warning: could not load BM25 index: {e}")
 
     yield
     app_state.embedder = None
     app_state.db = None
+    app_state.bm25 = None
 
 
 app = FastAPI(
@@ -140,6 +154,7 @@ def health_check():
     return {
         "status": "ok",
         "db_loaded": app_state.db_loaded,
+        "bm25_loaded": app_state.bm25 is not None,
         "ai_configured": app_state.ai_client.is_configured(),
         "active_preset": app_state.active_preset["id"]
         if app_state.active_preset
@@ -545,7 +560,27 @@ def load_db(name: str = "zim_db"):
         app_state.db = VectorDB(dim=384)
         app_state.db.load(name)
         app_state.db_loaded = True
-        return {"status": "loaded", "db": name}
+
+        # Load BM25 index if available (enables hybrid search)
+        bm25_path = f"{name}.bm25"
+        bm25_loaded = False
+        if os.path.exists(bm25_path):
+            try:
+                from bm25_index import BM25Index
+
+                app_state.bm25 = BM25Index()
+                app_state.bm25.load(name)
+                bm25_loaded = True
+            except Exception as e:
+                print(f"Warning: could not load BM25 index: {e}")
+                app_state.bm25 = None
+
+        return {
+            "status": "loaded",
+            "db": name,
+            "bm25_loaded": bm25_loaded,
+            "search_mode": "hybrid" if bm25_loaded else "semantic",
+        }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -558,10 +593,21 @@ def search(req: SearchRequest):
         raise HTTPException(status_code=400, detail="DB not loaded. Call /load first.")
 
     try:
-        query_embedding = app_state.embedder.encode([req.query])[0]
-        results = app_state.db.search(query_embedding, req.top_k)
-        return {"query": req.query, "results": results}
+        from hybrid_search import hybrid_search
 
+        query_embedding = app_state.embedder.encode([req.query])[0]
+        results = hybrid_search(
+            query=req.query,
+            query_embedding=query_embedding,
+            vectordb=app_state.db,
+            bm25_index=app_state.bm25,
+            top_k=req.top_k,
+        )
+        return {
+            "query": req.query,
+            "results": results,
+            "search_mode": "hybrid" if app_state.bm25 is not None else "semantic",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -585,9 +631,17 @@ def chat(req: ChatRequest):
         except Exception:
             create_conversation(conversation_id)
 
-        context_size = get_config_value("context_size")
+        from hybrid_search import hybrid_search
+
+        context_size = get_config_value("context_size") or 3
         query_embedding = app_state.embedder.encode([req.message])[0]
-        context = app_state.db.search(query_embedding, context_size)
+        context = hybrid_search(
+            query=req.message,
+            query_embedding=query_embedding,
+            vectordb=app_state.db,
+            bm25_index=app_state.bm25,
+            top_k=context_size,
+        )
 
         ai_response = app_state.ai_client.chat(req.message, context)
 
@@ -628,6 +682,7 @@ def clean_working_files():
     Deletes:
     - Vector database index files (*.index)
     - Vector database text stores (*.pkl)
+    - BM25 keyword index files (*.bm25)
     - Conversation history (conversations.db)
     - Python bytecode cache (__pycache__/)
 
@@ -641,7 +696,7 @@ def clean_working_files():
     errors = []
 
     # Remove vector DB index and text-store files
-    for pattern in ("*.index", "*.pkl"):
+    for pattern in ("*.index", "*.pkl", "*.bm25"):
         for path in sorted(glob.glob(pattern)):
             try:
                 os.remove(path)
@@ -669,6 +724,7 @@ def clean_working_files():
     # Reset in-memory vector DB state so stale handles are not used
     app_state.db = None
     app_state.db_loaded = False
+    app_state.bm25 = None
 
     return {
         "status": "cleaned",
