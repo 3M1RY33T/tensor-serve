@@ -1,11 +1,14 @@
 import glob
 import os
 import shutil
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 from uuid import uuid4
 
+import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ai_client import AIClient
@@ -127,6 +130,52 @@ class UpdateConfigRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str = None
+
+
+# OpenAI-compatible chat models
+class OpenAIChatMessage(BaseModel):
+    role: str  # "user", "assistant", "system"
+    content: str
+
+
+class OpenAIChatRequest(BaseModel):
+    model: str
+    messages: list[OpenAIChatMessage]
+    temperature: float = 0.7
+    max_tokens: int = 1000
+    stream: bool = False
+
+
+class OpenAIChatChoice(BaseModel):
+    index: int
+    message: OpenAIChatMessage
+    finish_reason: str = "stop"
+
+
+class OpenAIChatUsage(BaseModel):
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+class OpenAIChatResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: list[OpenAIChatChoice]
+    usage: OpenAIChatUsage
+
+
+class OpenAIModel(BaseModel):
+    id: str
+    object: str = "model"
+    owned_by: str = "local"
+
+
+class OpenAIModelList(BaseModel):
+    object: str = "list"
+    data: list[OpenAIModel]
 
 
 class DevdocsInstallRequest(BaseModel):
@@ -670,6 +719,169 @@ def get_conversation(conversation_id: str):
         limit = get_config_value("max_conversation_history") or 20
         history = get_conversation_history(conversation_id, limit=limit)
         return {"conversation_id": conversation_id, "messages": history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/models")
+def list_v1_models():
+    """
+    OpenAI-compatible /v1/models endpoint.
+
+    Returns the currently configured model in OpenAI format.
+    Used by tools like Zed, VS Code, and other OpenAI-compatible clients
+    for model discovery.
+    """
+    model_id = app_state.ai_client.model
+    if not model_id:
+        raise HTTPException(
+            status_code=400,
+            detail="AI model not configured. Call /config/set-ai-endpoint first.",
+        )
+
+    return OpenAIModelList(
+        data=[OpenAIModel(id=model_id, object="model", owned_by="local")]
+    )
+
+
+@app.post("/v1/chat/completions")
+def chat_completions(req: OpenAIChatRequest):
+    """
+    OpenAI-compatible /v1/chat/completions endpoint.
+
+    Automatically runs hybrid search (FAISS + BM25) on the last user message
+    and injects retrieved context into the system prompt. The client sees a
+    normal AI response with no knowledge of the RAG pipeline.
+
+    Supports all OpenAI chat completion parameters. The endpoint automatically
+    enhances responses with context from the vector database.
+    """
+    from hybrid_search import hybrid_search
+
+    if not app_state.ai_client.is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="AI endpoint not configured. Call /config/set-ai-endpoint first.",
+        )
+
+    if not app_state.db_loaded or app_state.db is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Vector database not loaded. Call /load first.",
+        )
+
+    if not req.messages:
+        raise HTTPException(status_code=400, detail="No messages provided")
+
+    try:
+        # Extract the last user message for RAG
+        user_message = None
+        for msg in reversed(req.messages):
+            if msg.role == "user":
+                user_message = msg.content
+                break
+
+        if not user_message:
+            raise HTTPException(
+                status_code=400, detail="No user message found in request"
+            )
+
+        # Perform hybrid search on the last user message
+        context_size = get_config_value("context_size") or 3
+        query_embedding = app_state.embedder.encode([user_message])[0]
+        context_chunks = hybrid_search(
+            query=user_message,
+            query_embedding=query_embedding,
+            vectordb=app_state.db,
+            bm25_index=app_state.bm25,
+            top_k=context_size,
+        )
+
+        # Build messages with injected context
+        messages_to_send = []
+
+        # Add system message with context if we have any
+        if context_chunks:
+            context_text = "\n\n".join([f"- {chunk}" for chunk in context_chunks])
+            system_message = (
+                f"Use the following context to answer questions:\n\n{context_text}"
+            )
+            messages_to_send.append({"role": "system", "content": system_message})
+
+        # Add all user messages (convert Pydantic models to dicts)
+        for msg in req.messages:
+            messages_to_send.append({"role": msg.role, "content": msg.content})
+
+        # Call the AI endpoint with OpenAI-compatible format
+        payload = {
+            "model": req.model,
+            "messages": messages_to_send,
+            "temperature": req.temperature,
+            "max_tokens": req.max_tokens,
+            "stream": req.stream,
+        }
+
+        if req.stream:
+            # Stream response from downstream and proxy it to the client as SSE
+            downstream = requests.post(
+                f"{app_state.ai_client.endpoint}/v1/chat/completions",
+                json=payload,
+                stream=True,
+                timeout=None,
+            )
+            try:
+                downstream.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                downstream.close()
+                raise HTTPException(status_code=502, detail=f"AI endpoint error: {str(e)}")
+
+            def event_stream():
+                try:
+                    for line in downstream.iter_lines(decode_unicode=True):
+                        if line:
+                            yield (line + "\n\n").encode("utf-8")
+                finally:
+                    downstream.close()
+
+            return StreamingResponse(event_stream(), media_type="text/event-stream")
+        else:
+            response = requests.post(
+                f"{app_state.ai_client.endpoint}/v1/chat/completions",
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+
+            result = response.json()
+
+            # Return in standard OpenAI format
+            return OpenAIChatResponse(
+                id=f"tensor-{int(time.time())}",
+                created=int(time.time()),
+                model=req.model,
+                choices=[
+                    OpenAIChatChoice(
+                        index=0,
+                        message=OpenAIChatMessage(
+                            role="assistant",
+                            content=result["choices"][0]["message"]["content"],
+                        ),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=OpenAIChatUsage(
+                    prompt_tokens=result.get("usage", {}).get("prompt_tokens", 0),
+                    completion_tokens=result.get("usage", {}).get("completion_tokens", 0),
+                    total_tokens=result.get("usage", {}).get("total_tokens", 0),
+                ),
+            )
+
+    except HTTPException:
+        raise
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"AI endpoint error: {str(e)}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
