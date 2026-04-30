@@ -106,18 +106,20 @@ The `devdocs_all` bundle entry additionally includes `completed_files` and `tota
 ### OpenAI-Compatible API
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/v1/models` | Returns the configured model in OpenAI format — used by editors for auto-discovery |
-| `POST` | `/v1/chat/completions` | OpenAI-compatible chat endpoint with automatic query analysis and RAG on the last user message; transparently injects retrieved context when needed and returns responses in standard OpenAI format |
+| `GET` | `/v1/models` | Proxies model discovery to the configured upstream AI server |
+| `POST` | `/v1/chat/completions` | RAG proxy for OpenAI-compatible chat; injects retrieved context when available, then forwards to the upstream AI server |
+| `*` | `/v1/{path}` | Pass-through proxy for other OpenAI-compatible endpoints such as embeddings, responses, audio, or provider-specific routes |
 
-**How it works**: When you send a message to `/v1/chat/completions`, the endpoint automatically:
-1. Extracts the last user message
-2. Analyzes whether retrieval is needed and selects `hybrid`, `faiss`, or `bm25`
-3. Uses cached embeddings/results when available, otherwise retrieves relevant context chunks
-4. Optionally reranks retrieved chunks, then injects context as a system message
-5. Sends the full conversation to the configured LLM
-6. Returns the response in OpenAI format
+**How the RAG proxy works**: When you send a message to `/v1/chat/completions`, Tensor Serve automatically:
+1. Reads the original request body without converting it into a local response schema
+2. Extracts the last user message
+3. Analyzes whether retrieval is needed and selects `hybrid`, `faiss`, or `bm25`
+4. Uses cached embeddings/results when available, otherwise retrieves relevant context chunks
+5. Optionally reranks retrieved chunks, then prepends a context system message
+6. Forwards the modified request to the configured upstream endpoint's `/v1/chat/completions`
+7. Returns the upstream response body, status code, and content type directly to the client
 
-The client sees a normal LLM response with no awareness of the query analysis, cache, retrieval, or reranking pipeline — context enhancement is completely transparent.
+All other `/v1/*` routes are forwarded unchanged. If no vector database is loaded, or if query analysis decides retrieval is unnecessary, chat requests are forwarded without context injection. This keeps Tensor Serve focused on offline context while the local AI server remains responsible for its own API surface.
 
 **Point any OpenAI-compatible tool at `http://localhost:8000/v1`** (or `http://localhost:8000` for tools that auto-discover models):
 
@@ -151,7 +153,7 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
 3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
 4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
-5. **Chat** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks + message are sent to the local LLM. Available via `/chat` (native format) or `/v1/chat/completions` (OpenAI-compatible integration)
+5. **Chat / Proxy** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks are sent to the local LLM. Native `/chat` builds its own request; `/v1/chat/completions` injects context and proxies to the upstream AI server.
 
 ### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
 
@@ -210,8 +212,8 @@ All four settings are readable via `GET /config` and writable via `PATCH /config
 
 | Setting | Default | What it controls |
 |---|---|---|
-| `ai_endpoint` | `null` | URL of local LLM server (required for `/chat`) |
-| `ai_model` | `null` | Model name passed to the LLM (required for `/chat`) |
+| `ai_endpoint` | `null` | URL of the upstream local AI server (required for `/chat` and `/v1/*` proxying) |
+| `ai_model` | `null` | Default model name used by native `/chat`; `/v1/*` proxy requests keep the client's requested model |
 | `context_size` | `3` | Number of vector DB chunks retrieved as context per chat message |
 | `max_conversation_history` | `20` | Maximum messages returned by `GET /conversation/{id}` |
 

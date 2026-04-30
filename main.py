@@ -1,14 +1,13 @@
 import glob
 import os
 import shutil
-import time
 from contextlib import asynccontextmanager
 from typing import Optional
 from uuid import uuid4
 
 import requests
-from fastapi import BackgroundTasks, FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from ai_client import AIClient
@@ -131,55 +130,6 @@ class UpdateConfigRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str = None
-
-
-# OpenAI-compatible chat models
-class OpenAIChatMessage(BaseModel):
-    role: str  # "user", "assistant", "system"
-    content: Optional[str] = None
-    tool_calls: Optional[list] = None
-
-
-class OpenAIChatRequest(BaseModel):
-    model: str
-    messages: list[OpenAIChatMessage]
-    temperature: float = 0.7
-    max_tokens: int = 1000
-    stream: bool = False
-    tools: Optional[list] = None
-    tool_choice: Optional[str] = None
-
-
-class OpenAIChatChoice(BaseModel):
-    index: int
-    message: OpenAIChatMessage
-    finish_reason: str = "stop"
-
-
-class OpenAIChatUsage(BaseModel):
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-
-
-class OpenAIChatResponse(BaseModel):
-    id: str
-    object: str = "chat.completion"
-    created: int
-    model: str
-    choices: list[OpenAIChatChoice]
-    usage: OpenAIChatUsage
-
-
-class OpenAIModel(BaseModel):
-    id: str
-    object: str = "model"
-    owned_by: str = "local"
-
-
-class OpenAIModelList(BaseModel):
-    object: str = "list"
-    data: list[OpenAIModel]
 
 
 class DevdocsInstallRequest(BaseModel):
@@ -822,232 +772,258 @@ def get_conversation(conversation_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/v1/models")
-def list_v1_models():
-    """
-    OpenAI-compatible /v1/models endpoint.
-
-    Returns the currently configured model in OpenAI format.
-    Used by tools like Zed, VS Code, and other OpenAI-compatible clients
-    for model discovery.
-    """
-    model_id = app_state.ai_client.model
-    if not model_id:
-        raise HTTPException(
-            status_code=400,
-            detail="AI model not configured. Call /config/set-ai-endpoint first.",
-        )
-
-    return OpenAIModelList(
-        data=[OpenAIModel(id=model_id, object="model", owned_by="local")]
-    )
-
-
-@app.post("/v1/chat/completions")
-def chat_completions(req: OpenAIChatRequest):
-    """
-    OpenAI-compatible /v1/chat/completions endpoint.
-
-    Automatically runs hybrid search (FAISS + BM25) on the last user message
-    and injects retrieved context into the system prompt. The client sees a
-    normal AI response with no knowledge of the RAG pipeline.
-
-    Supports all OpenAI chat completion parameters. The endpoint automatically
-    enhances responses with context from the vector database.
-    """
-    from hybrid_search import hybrid_search
-
+def _require_ai_endpoint() -> str:
+    """Return configured upstream AI endpoint or raise a client-facing error."""
     if not app_state.ai_client.is_configured():
         raise HTTPException(
             status_code=400,
             detail="AI endpoint not configured. Call /config/set-ai-endpoint first.",
         )
+    return app_state.ai_client.endpoint.rstrip("/")
 
-    if not app_state.db_loaded or app_state.db is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Vector database not loaded. Call /load first.",
-        )
 
-    if not req.messages:
-        raise HTTPException(status_code=400, detail="No messages provided")
+def _forward_request_headers(request: Request) -> dict:
+    """Forward useful client headers while letting requests recalculate transport headers."""
+    excluded = {
+        "host",
+        "content-length",
+        "connection",
+        "transfer-encoding",
+        "accept-encoding",
+    }
+    return {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in excluded
+    }
+
+
+def _forward_response_headers(response: requests.Response) -> dict:
+    """Forward safe upstream response headers through FastAPI."""
+    excluded = {
+        "content-length",
+        "connection",
+        "transfer-encoding",
+        "content-encoding",
+        "content-type",
+    }
+    return {
+        key: value
+        for key, value in response.headers.items()
+        if key.lower() not in excluded
+    }
+
+
+def _upstream_url(path: str, request: Request) -> str:
+    upstream = f"{_require_ai_endpoint()}/{path.lstrip('/')}"
+    if request.url.query:
+        upstream = f"{upstream}?{request.url.query}"
+    return upstream
+
+
+async def _proxy_ai_request(
+    request: Request,
+    path: str,
+    json_payload: Optional[dict] = None,
+    stream: bool = False,
+):
+    """
+    Forward an HTTP request to the configured upstream AI server.
+
+    If json_payload is provided, it replaces the original body. Otherwise the
+    request body is forwarded unchanged.
+    """
+    url = _upstream_url(path, request)
+    headers = _forward_request_headers(request)
 
     try:
-        # Extract the last user message for RAG
-        user_message = None
-        for msg in reversed(req.messages):
-            if msg.role == "user":
-                user_message = msg.content
-                break
-
-        if not user_message:
-            raise HTTPException(
-                status_code=400, detail="No user message found in request"
-            )
-
-        # Perform hybrid search on the last user message
-        from query_analyzer import QueryAnalyzer
-        
-        context_size = get_config_value("context_size") or 3
-        relevance_threshold = get_config_value("relevance_threshold") or 0.05
-        reranker_enabled = get_config_value("reranker_enabled")
-        if reranker_enabled is None:
-            reranker_enabled = False
-        
-        query_analysis_enabled = get_config_value("query_analysis_enabled")
-        if query_analysis_enabled is None:
-            query_analysis_enabled = True
-
-        context_chunks = []
-        if query_analysis_enabled:
-            needs_rag, reason = QueryAnalyzer.needs_rag(user_message)
-        else:
-            needs_rag = True
-            reason = "query_analysis_disabled"
-
-        if needs_rag and app_state.db_loaded:
-            # Select optimal search mode
-            search_mode = QueryAnalyzer.select_search_mode(user_message)
-            
-            # Check cache first
-            cached_chunks = query_cache.get_search_result(user_message, search_mode, context_size)
-            if cached_chunks is not None:
-                context_chunks = cached_chunks
-            else:
-                cached_embedding = query_cache.get_embedding(user_message)
-                if cached_embedding is not None:
-                    query_embedding = cached_embedding
-                else:
-                    query_embedding = app_state.embedder.encode([user_message])[0]
-                    query_cache.cache_embedding(user_message, query_embedding)
-                
-                context_chunks = hybrid_search(
-                    query=user_message,
-                    query_embedding=query_embedding,
-                    vectordb=app_state.db,
-                    bm25_index=app_state.bm25,
-                    top_k=context_size,
-                    candidate_k=max(context_size * 3, 10),
-                    relevance_threshold=relevance_threshold,
-                    search_mode=search_mode,
-                )
-                
-                # Re-rank results if enabled
-                if reranker_enabled and context_chunks:
-                    from reranker import rerank_results
-                    context_chunks = rerank_results(
-                        query=user_message,
-                        documents=context_chunks,
-                        top_k=context_size,
-                        reranker_enabled=True,
-                    )
-                
-                # Cache search results
-                query_cache.cache_search_result(user_message, search_mode, context_size, context_chunks)
-
-        # Build messages with injected context
-        messages_to_send = []
-
-        # Add system message with context if we have any
-        if context_chunks:
-            context_text = "\n\n".join([f"- {chunk}" for chunk in context_chunks])
-            system_message = (
-                f"Use the following context to answer questions:\n\n{context_text}"
-            )
-            messages_to_send.append({"role": "system", "content": system_message})
-
-        # Add all user messages (convert Pydantic models to dicts)
-        for msg in req.messages:
-            msg_dict = {"role": msg.role}
-            if msg.content:
-                msg_dict["content"] = msg.content
-            if msg.tool_calls:
-                msg_dict["tool_calls"] = msg.tool_calls
-            messages_to_send.append(msg_dict)
-
-        # Call the AI endpoint with OpenAI-compatible format
-        payload = {
-            "model": req.model,
-            "messages": messages_to_send,
-            "temperature": req.temperature,
-            "max_tokens": req.max_tokens,
-            "stream": req.stream,
-        }
-
-        # Include tools if provided
-        if req.tools:
-            payload["tools"] = req.tools
-        if req.tool_choice:
-            payload["tool_choice"] = req.tool_choice
-
-        if req.stream:
-            # Stream response from downstream and proxy it to the client as SSE
-            downstream = requests.post(
-                f"{app_state.ai_client.endpoint}/v1/chat/completions",
-                json=payload,
+        if stream:
+            upstream = requests.request(
+                request.method,
+                url,
+                headers=headers,
+                json=json_payload,
+                data=None if json_payload is not None else await request.body(),
                 stream=True,
                 timeout=None,
             )
-            try:
-                downstream.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                downstream.close()
-                raise HTTPException(status_code=502, detail=f"AI endpoint error: {str(e)}")
 
-            def event_stream():
+            def body_stream():
                 try:
-                    for line in downstream.iter_lines(decode_unicode=True):
-                        if line:
-                            yield (line + "\n\n").encode("utf-8")
+                    for chunk in upstream.iter_content(chunk_size=None):
+                        if chunk:
+                            yield chunk
                 finally:
-                    downstream.close()
+                    upstream.close()
 
-            return StreamingResponse(event_stream(), media_type="text/event-stream")
-        else:
-            response = requests.post(
-                f"{app_state.ai_client.endpoint}/v1/chat/completions",
-                json=payload,
-                timeout=60,
-            )
-            response.raise_for_status()
-
-            result = response.json()
-
-            # Extract message, handling both content and tool_calls
-            response_message = result["choices"][0]["message"]
-            message = OpenAIChatMessage(
-                role="assistant",
-                content=response_message.get("content"),
-                tool_calls=response_message.get("tool_calls"),
+            return StreamingResponse(
+                body_stream(),
+                status_code=upstream.status_code,
+                headers=_forward_response_headers(upstream),
+                media_type=upstream.headers.get("content-type"),
             )
 
-            # Return in standard OpenAI format
-            return OpenAIChatResponse(
-                id=f"tensor-{int(time.time())}",
-                created=int(time.time()),
-                model=req.model,
-                choices=[
-                    OpenAIChatChoice(
-                        index=0,
-                        message=message,
-                        finish_reason=result["choices"][0].get("finish_reason", "stop"),
-                    )
-                ],
-                usage=OpenAIChatUsage(
-                    prompt_tokens=result.get("usage", {}).get("prompt_tokens", 0),
-                    completion_tokens=result.get("usage", {}).get("completion_tokens", 0),
-                    total_tokens=result.get("usage", {}).get("total_tokens", 0),
-                ),
-            )
+        upstream = requests.request(
+            request.method,
+            url,
+            headers=headers,
+            json=json_payload,
+            data=None if json_payload is not None else await request.body(),
+            timeout=60,
+        )
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            headers=_forward_response_headers(upstream),
+            media_type=upstream.headers.get("content-type"),
+        )
 
     except HTTPException:
         raise
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"AI endpoint error: {str(e)}")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _last_user_text(messages: list) -> Optional[str]:
+    """Return the last string user message content, if one is present."""
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+    return None
+
+
+def _context_for_query(query: str) -> list:
+    """Retrieve optional RAG context for an OpenAI-compatible chat request."""
+    if not app_state.db_loaded or app_state.db is None:
+        return []
+
+    from hybrid_search import hybrid_search
+    from query_analyzer import QueryAnalyzer
+
+    query_analysis_enabled = get_config_value("query_analysis_enabled")
+    if query_analysis_enabled is None:
+        query_analysis_enabled = True
+
+    if query_analysis_enabled:
+        needs_rag, reason = QueryAnalyzer.needs_rag(query)
+    else:
+        needs_rag = True
+        reason = "query_analysis_disabled"
+
+    if not needs_rag:
+        return []
+
+    context_size = get_config_value("context_size") or 3
+    relevance_threshold = get_config_value("relevance_threshold") or 0.05
+    reranker_enabled = get_config_value("reranker_enabled")
+    if reranker_enabled is None:
+        reranker_enabled = False
+
+    search_mode = QueryAnalyzer.select_search_mode(query)
+    cached_chunks = query_cache.get_search_result(query, search_mode, context_size)
+    if cached_chunks is not None:
+        return cached_chunks
+
+    cached_embedding = query_cache.get_embedding(query)
+    if cached_embedding is not None:
+        query_embedding = cached_embedding
+    else:
+        query_embedding = app_state.embedder.encode([query])[0]
+        query_cache.cache_embedding(query, query_embedding)
+
+    context_chunks = hybrid_search(
+        query=query,
+        query_embedding=query_embedding,
+        vectordb=app_state.db,
+        bm25_index=app_state.bm25,
+        top_k=context_size,
+        candidate_k=max(context_size * 3, 10),
+        relevance_threshold=relevance_threshold,
+        search_mode=search_mode,
+    )
+
+    if reranker_enabled and context_chunks:
+        from reranker import rerank_results
+
+        context_chunks = rerank_results(
+            query=query,
+            documents=context_chunks,
+            top_k=context_size,
+            reranker_enabled=True,
+        )
+
+    query_cache.cache_search_result(query, search_mode, context_size, context_chunks)
+    return context_chunks
+
+
+def _payload_with_context(payload: dict, context_chunks: list) -> dict:
+    """Return a chat payload with retrieved context injected as a system message."""
+    if not context_chunks:
+        return payload
+
+    context_text = "\n\n".join([f"- {chunk}" for chunk in context_chunks])
+    system_message = {
+        "role": "system",
+        "content": f"Use the following context to answer questions:\n\n{context_text}",
+    }
+
+    updated = dict(payload)
+    updated["messages"] = [system_message, *payload.get("messages", [])]
+    return updated
+
+
+@app.get("/v1/models")
+async def list_v1_models(request: Request):
+    """
+    Proxy model discovery to the configured upstream AI server.
+    """
+    return await _proxy_ai_request(request, "v1/models")
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    """
+    Proxy OpenAI-compatible chat completions, injecting ZIM context when available.
+    """
+    try:
+        payload = await request.json()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Invalid JSON body: {str(e)}")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="JSON body must be an object",
+        )
+
+    messages = payload.get("messages", [])
+    if messages is not None and not isinstance(messages, list):
+        raise HTTPException(
+            status_code=400, detail="'messages' must be a list when provided"
+        )
+
+    user_message = _last_user_text(messages)
+    context_chunks = _context_for_query(user_message) if user_message else []
+    payload = _payload_with_context(payload, context_chunks)
+
+    return await _proxy_ai_request(
+        request,
+        "v1/chat/completions",
+        json_payload=payload,
+        stream=bool(payload.get("stream")),
+    )
+
+
+@app.api_route(
+    "/v1/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+async def proxy_v1(path: str, request: Request):
+    """Proxy any other OpenAI-compatible endpoint to the upstream AI server."""
+    return await _proxy_ai_request(request, f"v1/{path}")
 
 
 @app.post("/clean")

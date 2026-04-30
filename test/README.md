@@ -26,6 +26,7 @@ large ZIM ingestion. They cover the core pieces that can be checked quickly:
 | `test_conversations.py` | SQLite conversation storage and chronological history retrieval |
 | `test_vectordb.py` | FAISS index save/load/search behavior |
 | `test_ai_client.py` | Prompt context deduplication and model discovery parsing |
+| `test_proxy_api.py` | `/v1/*` proxy forwarding, chat context injection, and upstream response passthrough |
 | `test_presets_and_zim.py` | Custom preset lifecycle and local ZIM manifest scanning |
 
 ## Manual API smoke test
@@ -61,5 +62,5 @@ Run the smoke script:
 ```
 
 Use the smoke script when you want to verify the full running service path:
-HTTP server, configured LLM endpoint, loaded retrieval index, and
-OpenAI-compatible chat responses.
+HTTP server, configured upstream LLM endpoint, loaded retrieval index, context
+injection, and proxied OpenAI-compatible chat responses.
