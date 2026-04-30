@@ -37,6 +37,8 @@ def hybrid_search(
     top_k: int = 5,
     candidate_k: Optional[int] = None,
     rrf_k: int = 60,
+    relevance_threshold: float = 0.0,
+    search_mode: str = "hybrid",
 ) -> List[str]:
     """
     Hybrid retrieval: FAISS semantic search + BM25 keyword search via RRF.
@@ -50,13 +52,15 @@ def hybrid_search(
     - Neither        → empty list
 
     Args:
-        query:           Raw text query (tokenised for BM25).
-        query_embedding: Pre-computed embedding vector (used for FAISS).
-        vectordb:        VectorDB instance, or None.
-        bm25_index:      BM25Index instance, or None.
-        top_k:           Number of final results to return.
-        candidate_k:     Candidates fetched from each index (default top_k × 3).
-        rrf_k:           RRF constant (default 60).
+        query:                Raw text query (tokenised for BM25).
+        query_embedding:      Pre-computed embedding vector (used for FAISS).
+        vectordb:             VectorDB instance, or None.
+        bm25_index:           BM25Index instance, or None.
+        top_k:                Number of final results to return.
+        candidate_k:          Candidates fetched from each index (default top_k × 3).
+        rrf_k:                RRF constant (default 60).
+        relevance_threshold:  Minimum RRF score to include chunk (0.0 = no filtering).
+        search_mode:          'hybrid' (both), 'faiss' (semantic only), or 'bm25' (keyword only).
 
     Returns:
         List of up to top_k text chunks, best match first.
@@ -67,15 +71,15 @@ def hybrid_search(
     ranked_lists: List[List[int]] = []
     texts: List[str] = []
 
-    # --- FAISS semantic search --------------------------------------------
-    if vectordb is not None:
+    # --- FAISS semantic search (if mode allows) ---
+    if search_mode in ("hybrid", "faiss") and vectordb is not None:
         faiss_indices = vectordb.search_indices(query_embedding, candidate_k)
         if faiss_indices:
             ranked_lists.append(faiss_indices)
             texts = vectordb.texts
 
-    # --- BM25 keyword search ----------------------------------------------
-    if bm25_index is not None:
+    # --- BM25 keyword search (if mode allows) ---
+    if search_mode in ("hybrid", "bm25") and bm25_index is not None:
         bm25_indices = bm25_index.search_indices(query, candidate_k)
         if bm25_indices:
             ranked_lists.append(bm25_indices)
@@ -85,20 +89,20 @@ def hybrid_search(
     if not ranked_lists or not texts:
         return []
 
-    # --- Reciprocal Rank Fusion -------------------------------------------
+    # --- Reciprocal Rank Fusion (only if hybrid mode with both indexes) ---
     if len(ranked_lists) == 1:
-        fused_indices = [idx for idx in ranked_lists[0]]
+        fused_ranked = [(idx, 1.0 / (rrf_k + rank)) for rank, idx in enumerate(ranked_lists[0], start=1)]
     else:
-        fused_indices = [
-            idx for idx, _ in reciprocal_rank_fusion(ranked_lists, k=rrf_k)
-        ]
+        fused_ranked = reciprocal_rank_fusion(ranked_lists, k=rrf_k)
 
-    # Deduplicate, preserve order, trim to top_k
+    # Deduplicate, apply threshold, preserve order, trim to top_k
     seen: set = set()
     result: List[str] = []
-    for idx in fused_indices:
+    for idx, score in fused_ranked:
         if idx in seen or idx >= len(texts):
             continue
+        if score < relevance_threshold:
+            break
         seen.add(idx)
         result.append(texts[idx])
         if len(result) >= top_k:

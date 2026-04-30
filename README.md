@@ -40,6 +40,12 @@ Interactive docs available at `http://localhost:8000/docs`
 | `POST` | `/config/set-ai-endpoint` | Set `ai_endpoint` and optionally `ai_model` (auto-detected if omitted) |
 | `PATCH` | `/config` | Update any combination of the four settings (all fields optional) |
 
+### Cache
+| Method | Endpoint | What it does |
+|---|---|---|
+| `GET` | `/cache/stats` | View query embedding and search-result cache statistics |
+| `POST` | `/cache/clear` | Clear all cached query embeddings and search results |
+
 ### Presets
 | Method | Endpoint | What it does |
 |---|---|---|
@@ -69,7 +75,7 @@ Interactive docs available at `http://localhost:8000/docs`
 | `POST` | `/ingest` | Ingest a single ZIM file into a named vector DB |
 | `POST` | `/ingest-multiple` | Ingest multiple ZIM files into one combined vector DB |
 | `GET` | `/load?name=<db>` | Load a previously ingested database into memory |
-| `POST` | `/search` | Hybrid search (FAISS + BM25 via RRF) — returns top-k chunks; response includes `search_mode` |
+| `POST` | `/search` | Auto-selected retrieval (`hybrid`, `faiss`, or `bm25`) — returns top-k chunks; response includes `search_mode` |
 
 ### Chat & Conversations
 | Method | Endpoint | What it does |
@@ -101,16 +107,17 @@ The `devdocs_all` bundle entry additionally includes `completed_files` and `tota
 | Method | Endpoint | What it does |
 |---|---|---|
 | `GET` | `/v1/models` | Returns the configured model in OpenAI format — used by editors for auto-discovery |
-| `POST` | `/v1/chat/completions` | OpenAI-compatible chat endpoint with automatic RAG on the last user message; transparently injects retrieved context and returns responses in standard OpenAI format |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat endpoint with automatic query analysis and RAG on the last user message; transparently injects retrieved context when needed and returns responses in standard OpenAI format |
 
 **How it works**: When you send a message to `/v1/chat/completions`, the endpoint automatically:
 1. Extracts the last user message
-2. Performs hybrid search (FAISS + BM25) to retrieve relevant context chunks
-3. Injects the retrieved context as a system message
-4. Sends the full conversation to the configured LLM
-5. Returns the response in OpenAI format
+2. Analyzes whether retrieval is needed and selects `hybrid`, `faiss`, or `bm25`
+3. Uses cached embeddings/results when available, otherwise retrieves relevant context chunks
+4. Optionally reranks retrieved chunks, then injects context as a system message
+5. Sends the full conversation to the configured LLM
+6. Returns the response in OpenAI format
 
-The client sees a normal LLM response with no awareness of the RAG pipeline — context enhancement is completely transparent.
+The client sees a normal LLM response with no awareness of the query analysis, cache, retrieval, or reranking pipeline — context enhancement is completely transparent.
 
 **Point any OpenAI-compatible tool at `http://localhost:8000/v1`** (or `http://localhost:8000` for tools that auto-discover models):
 
@@ -143,11 +150,12 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 1. **Download** — ZIM files fetched from Kiwix and stored in `zim_files/`
 2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
 3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
-4. **Chat** — User message is embedded → hybrid search (FAISS + BM25 via RRF) retrieves top-k chunks → chunks + message sent to the local LLM → response returned with source context included. Available via `/chat` (native format) or `/v1/chat/completions` (OpenAI-compatible integration)
+4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
+5. **Chat** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks + message are sent to the local LLM. Available via `/chat` (native format) or `/v1/chat/completions` (OpenAI-compatible integration)
 
 ### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
 
-Every search and chat request runs **two retrievals in parallel** and merges them:
+Search and chat requests can run **two retrievals in parallel** and merge them:
 
 | | FAISS (semantic) | BM25 (keyword) |
 |---|---|---|
@@ -156,6 +164,16 @@ Every search and chat request runs **two retrievals in parallel** and merges the
 | Index file | `{name}.index` + `{name}.pkl` | `{name}.bm25` |
 
 Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in both lists float to the top. The pipeline degrades gracefully — if only one index is available it is used alone.
+
+The query analyzer automatically selects the search strategy:
+
+| Mode | When it is used |
+|---|---|
+| `hybrid` | Mixed or general queries where semantic and keyword signals both help |
+| `faiss` | Conceptual queries such as explanations, architecture, patterns, and design questions |
+| `bm25` | Keyword-heavy queries such as API names, code symbols, methods, classes, errors, and short exact searches |
+
+Query embeddings and search results are cached with an in-memory LRU cache to reduce repeated embedding and retrieval work. If enabled, the optional cross-encoder reranker performs a second-stage pass over retrieved chunks before context is sent to the model.
 
 ---
 
@@ -172,6 +190,9 @@ Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`
 | `vectordb.py` | FAISS index wrapper (save/load/search/search_indices) |
 | `bm25_index.py` | BM25 keyword index wrapper (save/load/search_indices) |
 | `hybrid_search.py` | Reciprocal Rank Fusion — merges FAISS and BM25 results |
+| `query_analyzer.py` | Detects simple queries, decides whether RAG is needed, and selects `hybrid` / `faiss` / `bm25` search mode |
+| `cache.py` | In-memory LRU cache for query embeddings and search results |
+| `reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
 | `chunker.py` | 500-word overlapping text chunker |
 | `utils.py` | ZIM article iterator and HTML cleaner |
 | `ai_client.py` | HTTP client for the local LLM endpoint |
@@ -193,6 +214,14 @@ All four settings are readable via `GET /config` and writable via `PATCH /config
 | `ai_model` | `null` | Model name passed to the LLM (required for `/chat`) |
 | `context_size` | `3` | Number of vector DB chunks retrieved as context per chat message |
 | `max_conversation_history` | `20` | Maximum messages returned by `GET /conversation/{id}` |
+
+Advanced retrieval settings are read from `config.json`:
+
+| Setting | Default | What it controls |
+|---|---|---|
+| `relevance_threshold` | `0.05` | Minimum hybrid-search relevance score required for a chunk to be included |
+| `query_analysis_enabled` | `true` | Whether simple queries can skip RAG and domain queries can auto-select search mode |
+| `reranker_enabled` | `false` | Whether retrieved chunks are passed through the optional cross-encoder reranker |
 
 #### Model auto-detection
 

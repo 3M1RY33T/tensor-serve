@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ai_client import AIClient
+from cache import query_cache
 from config import get_config_value, load_config, set_config_value
 from conversations import add_message, create_conversation, get_conversation_history
 from embedder import Embedder
@@ -135,7 +136,8 @@ class ChatRequest(BaseModel):
 # OpenAI-compatible chat models
 class OpenAIChatMessage(BaseModel):
     role: str  # "user", "assistant", "system"
-    content: str
+    content: Optional[str] = None
+    tool_calls: Optional[list] = None
 
 
 class OpenAIChatRequest(BaseModel):
@@ -144,6 +146,8 @@ class OpenAIChatRequest(BaseModel):
     temperature: float = 0.7
     max_tokens: int = 1000
     stream: bool = False
+    tools: Optional[list] = None
+    tool_choice: Optional[str] = None
 
 
 class OpenAIChatChoice(BaseModel):
@@ -209,6 +213,19 @@ def health_check():
         if app_state.active_preset
         else None,
     }
+
+
+@app.get("/cache/stats")
+def cache_stats():
+    """Get query cache statistics."""
+    return query_cache.get_stats()
+
+
+@app.post("/cache/clear")
+def clear_cache():
+    """Clear all cached queries and embeddings."""
+    query_cache.clear()
+    return {"status": "cleared"}
 
 
 @app.get("/config")
@@ -643,19 +660,55 @@ def search(req: SearchRequest):
 
     try:
         from hybrid_search import hybrid_search
+        from query_analyzer import QueryAnalyzer
 
-        query_embedding = app_state.embedder.encode([req.query])[0]
-        results = hybrid_search(
-            query=req.query,
-            query_embedding=query_embedding,
-            vectordb=app_state.db,
-            bm25_index=app_state.bm25,
-            top_k=req.top_k,
-        )
+        relevance_threshold = get_config_value("relevance_threshold") or 0.05
+        reranker_enabled = get_config_value("reranker_enabled")
+        if reranker_enabled is None:
+            reranker_enabled = False
+        
+        search_mode = QueryAnalyzer.select_search_mode(req.query)
+        
+        # Check cache first
+        cached_results = query_cache.get_search_result(req.query, search_mode, req.top_k)
+        if cached_results is not None:
+            results = cached_results
+        else:
+            cached_embedding = query_cache.get_embedding(req.query)
+            if cached_embedding is not None:
+                query_embedding = cached_embedding
+            else:
+                query_embedding = app_state.embedder.encode([req.query])[0]
+                query_cache.cache_embedding(req.query, query_embedding)
+            
+            results = hybrid_search(
+                query=req.query,
+                query_embedding=query_embedding,
+                vectordb=app_state.db,
+                bm25_index=app_state.bm25,
+                top_k=req.top_k,
+                candidate_k=max(req.top_k * 3, 10),
+                relevance_threshold=relevance_threshold,
+                search_mode=search_mode,
+            )
+            
+            # Re-rank results if enabled
+            if reranker_enabled and results:
+                from reranker import rerank_results
+                results = rerank_results(
+                    query=req.query,
+                    documents=results,
+                    top_k=req.top_k,
+                    reranker_enabled=True,
+                )
+            
+            # Cache search results
+            query_cache.cache_search_result(req.query, search_mode, req.top_k, results)
+        
         return {
             "query": req.query,
             "results": results,
-            "search_mode": "hybrid" if app_state.bm25 is not None else "semantic",
+            "search_mode": search_mode,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -681,16 +734,62 @@ def chat(req: ChatRequest):
             create_conversation(conversation_id)
 
         from hybrid_search import hybrid_search
+        from query_analyzer import QueryAnalyzer
 
-        context_size = get_config_value("context_size") or 3
-        query_embedding = app_state.embedder.encode([req.message])[0]
-        context = hybrid_search(
-            query=req.message,
-            query_embedding=query_embedding,
-            vectordb=app_state.db,
-            bm25_index=app_state.bm25,
-            top_k=context_size,
-        )
+        # Check if query needs RAG
+        query_analysis_enabled = get_config_value("query_analysis_enabled")
+        if query_analysis_enabled is None:
+            query_analysis_enabled = True
+
+        context = []
+        if query_analysis_enabled:
+            needs_rag, reason = QueryAnalyzer.needs_rag(req.message)
+        else:
+            needs_rag = True
+            reason = "query_analysis_disabled"
+
+        if needs_rag and app_state.db_loaded:
+            context_size = get_config_value("context_size") or 3
+            relevance_threshold = get_config_value("relevance_threshold") or 0.05
+            reranker_enabled = get_config_value("reranker_enabled")
+            if reranker_enabled is None:
+                reranker_enabled = False
+            
+            # Select optimal search mode
+            search_mode = QueryAnalyzer.select_search_mode(req.message)
+            
+            # Check cache first
+            cached_embedding = query_cache.get_embedding(req.message)
+            if cached_embedding is not None:
+                query_embedding = cached_embedding
+            else:
+                query_embedding = app_state.embedder.encode([req.message])[0]
+                query_cache.cache_embedding(req.message, query_embedding)
+            
+            # Adaptive context: retrieve more candidates and filter by relevance
+            context = hybrid_search(
+                query=req.message,
+                query_embedding=query_embedding,
+                vectordb=app_state.db,
+                bm25_index=app_state.bm25,
+                top_k=context_size,
+                candidate_k=max(context_size * 3, 10),
+                relevance_threshold=relevance_threshold,
+                search_mode=search_mode,
+            )
+            
+            # Re-rank results if enabled
+            if reranker_enabled and context:
+                from reranker import rerank_results
+                context = rerank_results(
+                    query=req.message,
+                    documents=context,
+                    top_k=context_size,
+                    reranker_enabled=True,
+                )
+            
+            # Cache search results
+            query_cache.cache_search_result(req.message, search_mode, context_size, context)
 
         ai_response = app_state.ai_client.chat(req.message, context)
 
@@ -787,15 +886,64 @@ def chat_completions(req: OpenAIChatRequest):
             )
 
         # Perform hybrid search on the last user message
+        from query_analyzer import QueryAnalyzer
+        
         context_size = get_config_value("context_size") or 3
-        query_embedding = app_state.embedder.encode([user_message])[0]
-        context_chunks = hybrid_search(
-            query=user_message,
-            query_embedding=query_embedding,
-            vectordb=app_state.db,
-            bm25_index=app_state.bm25,
-            top_k=context_size,
-        )
+        relevance_threshold = get_config_value("relevance_threshold") or 0.05
+        reranker_enabled = get_config_value("reranker_enabled")
+        if reranker_enabled is None:
+            reranker_enabled = False
+        
+        query_analysis_enabled = get_config_value("query_analysis_enabled")
+        if query_analysis_enabled is None:
+            query_analysis_enabled = True
+
+        context_chunks = []
+        if query_analysis_enabled:
+            needs_rag, reason = QueryAnalyzer.needs_rag(user_message)
+        else:
+            needs_rag = True
+            reason = "query_analysis_disabled"
+
+        if needs_rag and app_state.db_loaded:
+            # Select optimal search mode
+            search_mode = QueryAnalyzer.select_search_mode(user_message)
+            
+            # Check cache first
+            cached_chunks = query_cache.get_search_result(user_message, search_mode, context_size)
+            if cached_chunks is not None:
+                context_chunks = cached_chunks
+            else:
+                cached_embedding = query_cache.get_embedding(user_message)
+                if cached_embedding is not None:
+                    query_embedding = cached_embedding
+                else:
+                    query_embedding = app_state.embedder.encode([user_message])[0]
+                    query_cache.cache_embedding(user_message, query_embedding)
+                
+                context_chunks = hybrid_search(
+                    query=user_message,
+                    query_embedding=query_embedding,
+                    vectordb=app_state.db,
+                    bm25_index=app_state.bm25,
+                    top_k=context_size,
+                    candidate_k=max(context_size * 3, 10),
+                    relevance_threshold=relevance_threshold,
+                    search_mode=search_mode,
+                )
+                
+                # Re-rank results if enabled
+                if reranker_enabled and context_chunks:
+                    from reranker import rerank_results
+                    context_chunks = rerank_results(
+                        query=user_message,
+                        documents=context_chunks,
+                        top_k=context_size,
+                        reranker_enabled=True,
+                    )
+                
+                # Cache search results
+                query_cache.cache_search_result(user_message, search_mode, context_size, context_chunks)
 
         # Build messages with injected context
         messages_to_send = []
@@ -810,7 +958,12 @@ def chat_completions(req: OpenAIChatRequest):
 
         # Add all user messages (convert Pydantic models to dicts)
         for msg in req.messages:
-            messages_to_send.append({"role": msg.role, "content": msg.content})
+            msg_dict = {"role": msg.role}
+            if msg.content:
+                msg_dict["content"] = msg.content
+            if msg.tool_calls:
+                msg_dict["tool_calls"] = msg.tool_calls
+            messages_to_send.append(msg_dict)
 
         # Call the AI endpoint with OpenAI-compatible format
         payload = {
@@ -820,6 +973,12 @@ def chat_completions(req: OpenAIChatRequest):
             "max_tokens": req.max_tokens,
             "stream": req.stream,
         }
+
+        # Include tools if provided
+        if req.tools:
+            payload["tools"] = req.tools
+        if req.tool_choice:
+            payload["tool_choice"] = req.tool_choice
 
         if req.stream:
             # Stream response from downstream and proxy it to the client as SSE
@@ -854,6 +1013,14 @@ def chat_completions(req: OpenAIChatRequest):
 
             result = response.json()
 
+            # Extract message, handling both content and tool_calls
+            response_message = result["choices"][0]["message"]
+            message = OpenAIChatMessage(
+                role="assistant",
+                content=response_message.get("content"),
+                tool_calls=response_message.get("tool_calls"),
+            )
+
             # Return in standard OpenAI format
             return OpenAIChatResponse(
                 id=f"tensor-{int(time.time())}",
@@ -862,11 +1029,8 @@ def chat_completions(req: OpenAIChatRequest):
                 choices=[
                     OpenAIChatChoice(
                         index=0,
-                        message=OpenAIChatMessage(
-                            role="assistant",
-                            content=result["choices"][0]["message"]["content"],
-                        ),
-                        finish_reason="stop",
+                        message=message,
+                        finish_reason=result["choices"][0].get("finish_reason", "stop"),
                     )
                 ],
                 usage=OpenAIChatUsage(
