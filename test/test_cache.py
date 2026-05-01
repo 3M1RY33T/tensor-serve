@@ -1,6 +1,6 @@
 import time
 
-from cache import QueryCache
+from src.cache import QueryCache
 
 
 def test_cache_embedding_and_ttl():

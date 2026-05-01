@@ -38,7 +38,7 @@ a loaded vector database.
 Start the server:
 
 ```bash
-uvicorn main:app --reload
+uvicorn src.main:app --reload
 ```
 
 Configure an AI endpoint:

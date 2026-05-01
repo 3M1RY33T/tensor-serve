@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from zim_downloader import get_installed_files_for_preset
+from src.zim_downloader import get_installed_files_for_preset
 
 PRESETS_FILE = "presets.json"
 

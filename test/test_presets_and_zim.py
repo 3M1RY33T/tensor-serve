@@ -1,5 +1,5 @@
-import presets
-import zim_downloader
+import src.presets as presets
+import src.zim_downloader as zim_downloader
 
 
 def test_custom_preset_lifecycle(tmp_path, monkeypatch):

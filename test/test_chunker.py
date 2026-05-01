@@ -1,4 +1,4 @@
-from chunker import chunk_text
+from src.chunker import chunk_text
 
 
 def test_empty_chunk():

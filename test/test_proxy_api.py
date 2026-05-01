@@ -2,7 +2,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-import main
+import main as main
 from main import app
 
 

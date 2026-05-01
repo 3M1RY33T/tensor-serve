@@ -10,14 +10,14 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from ai_client import AIClient
-from cache import query_cache
-from config import get_config_value, load_config, set_config_value
-from conversations import add_message, create_conversation, get_conversation_history
-from embedder import Embedder
-from ingest import run_ingestion
-from multi_ingest import run_multi_ingest
-from presets import (
+from src.ai_client import AIClient
+from src.cache import query_cache
+from src.config import get_config_value, load_config, set_config_value
+from src.conversations import add_message, create_conversation, get_conversation_history
+from src.embedder import Embedder
+from src.ingest import run_ingestion
+from src.multi_ingest import run_multi_ingest
+from src.presets import (
     create_custom_preset,
     delete_custom_preset,
     get_active_preset,
@@ -27,8 +27,8 @@ from presets import (
     init_presets,
     set_active_preset,
 )
-from vectordb import VectorDB
-from zim_downloader import (
+from src.vectordb import VectorDB
+from src.zim_downloader import (
     bytes_to_human,
     get_preset_installation_status,
     is_file_installed,
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
             bm25_path = f"{db_name}.bm25"
             if os.path.exists(bm25_path):
                 try:
-                    from bm25_index import BM25Index
+                    from src.bm25_index import BM25Index
 
                     app_state.bm25 = BM25Index()
                     app_state.bm25.load(db_name)
@@ -197,7 +197,7 @@ def set_ai_endpoint(req: ConfigRequest):
         all_models = []
 
         if not ai_model:
-            from ai_client import AIClient as _AIClient
+            from src.ai_client import AIClient as _AIClient
 
             all_models = _AIClient.list_models(req.ai_endpoint)
             if not all_models:
@@ -243,7 +243,7 @@ def list_available_models(endpoint: Optional[str] = None):
     saving it — useful for previewing models before calling
     ``POST /config/set-ai-endpoint``.
     """
-    from ai_client import AIClient as _AIClient
+    from src.ai_client import AIClient as _AIClient
 
     target = endpoint or app_state.ai_client.endpoint
     if not target:
@@ -350,7 +350,7 @@ def ingest_preset(preset_id: str, zim_file_indices: list = None):
             # For built-in presets, resolve paths from the manifest via
             # zim_downloader so that updated IDs (e.g. devdocs_all) are
             # honoured instead of the stale IDs stored in presets.py.
-            from zim_downloader import get_installed_files_for_preset as _get_paths
+            from src.zim_downloader import get_installed_files_for_preset as _get_paths
 
             zim_paths = _get_paths(preset_id)
         else:
@@ -367,7 +367,7 @@ def ingest_preset(preset_id: str, zim_file_indices: list = None):
                 status_code=400,
                 detail=(
                     f"No installed ZIM files found for preset '{preset_id}'. "
-                    "Install files first with: python manage_zim.py install-preset "
+                    "Install files first with: python -m src.manage_zim install-preset "
                     f"{preset_id}"
                 ),
             )
@@ -441,7 +441,7 @@ def get_zim_installation_status(preset_id: str):
 @app.get("/zim/available")
 def list_available_zim():
     """List all available ZIM files for download."""
-    from zim_downloader import list_available_files
+    from src.zim_downloader import list_available_files
 
     available = list_available_files()
     result = {}
@@ -471,7 +471,7 @@ def list_devdocs():
     Each entry includes its installed status. Note that this endpoint makes
     a live network request to Kiwix and may take a moment to respond.
     """
-    from zim_downloader import list_devdocs_catalog
+    from src.zim_downloader import list_devdocs_catalog
 
     catalog = list_devdocs_catalog()
     total_bytes = sum(e["size_bytes"] for e in catalog)
@@ -513,8 +513,8 @@ def install_devdocs(req: DevdocsInstallRequest, background_tasks: BackgroundTask
     list of queued file IDs so the caller can poll ``GET /zim/installed`` to
     track progress.
     """
-    from zim_downloader import download_file as _download_file
-    from zim_downloader import list_devdocs_catalog
+    from src.zim_downloader import download_file as _download_file
+    from src.zim_downloader import list_devdocs_catalog
 
     catalog = list_devdocs_catalog()
     catalog_map = {e["id"]: e for e in catalog}
@@ -582,7 +582,7 @@ def load_db(name: str = "zim_db"):
         bm25_loaded = False
         if os.path.exists(bm25_path):
             try:
-                from bm25_index import BM25Index
+                from src.bm25_index import BM25Index
 
                 app_state.bm25 = BM25Index()
                 app_state.bm25.load(name)
@@ -609,8 +609,8 @@ def search(req: SearchRequest):
         raise HTTPException(status_code=400, detail="DB not loaded. Call /load first.")
 
     try:
-        from hybrid_search import hybrid_search
-        from query_analyzer import QueryAnalyzer
+        from src.hybrid_search import hybrid_search
+        from src.query_analyzer import QueryAnalyzer
 
         relevance_threshold = get_config_value("relevance_threshold") or 0.05
         reranker_enabled = get_config_value("reranker_enabled")
@@ -644,7 +644,7 @@ def search(req: SearchRequest):
             
             # Re-rank results if enabled
             if reranker_enabled and results:
-                from reranker import rerank_results
+                from src.reranker import rerank_results
                 results = rerank_results(
                     query=req.query,
                     documents=results,
@@ -683,8 +683,8 @@ def chat(req: ChatRequest):
         except Exception:
             create_conversation(conversation_id)
 
-        from hybrid_search import hybrid_search
-        from query_analyzer import QueryAnalyzer
+        from src.hybrid_search import hybrid_search
+        from src.query_analyzer import QueryAnalyzer
 
         # Check if query needs RAG
         query_analysis_enabled = get_config_value("query_analysis_enabled")
@@ -730,7 +730,7 @@ def chat(req: ChatRequest):
             
             # Re-rank results if enabled
             if reranker_enabled and context:
-                from reranker import rerank_results
+                from src.reranker import rerank_results
                 context = rerank_results(
                     query=req.message,
                     documents=context,
@@ -900,8 +900,8 @@ def _context_for_query(query: str) -> list:
     if not app_state.db_loaded or app_state.db is None:
         return []
 
-    from hybrid_search import hybrid_search
-    from query_analyzer import QueryAnalyzer
+    from src.hybrid_search import hybrid_search
+    from src.query_analyzer import QueryAnalyzer
 
     query_analysis_enabled = get_config_value("query_analysis_enabled")
     if query_analysis_enabled is None:
@@ -946,7 +946,7 @@ def _context_for_query(query: str) -> list:
     )
 
     if reranker_enabled and context_chunks:
-        from reranker import rerank_results
+        from src.reranker import rerank_results
 
         context_chunks = rerank_results(
             query=query,
@@ -1094,7 +1094,7 @@ def install_zim(req: ZimInstallRequest, background_tasks: BackgroundTasks):
     Provide a list of Kiwix file IDs (e.g. ``["devdocs_en_python", "devdocs_en_rust"]``).
     Use ``GET /zim/progress`` to track download status after queuing.
     """
-    from zim_downloader import download_file as _dl
+    from src.zim_downloader import download_file as _dl
 
     queued = []
     already_installed = []
@@ -1123,10 +1123,10 @@ def install_preset_zim(req: ZimInstallPresetRequest, background_tasks: Backgroun
     Leave ``file_ids`` empty to queue every uninstalled file in the preset.
 
     This is the API equivalent of:
-    ``python manage_zim.py install-preset <preset>``
+    ``python -m src.manage_zim install-preset <preset>``
     """
-    from zim_downloader import PRESET_FILES
-    from zim_downloader import download_file as _dl
+    from src.zim_downloader import PRESET_FILES
+    from src.zim_downloader import download_file as _dl
 
     if req.preset_id not in PRESET_FILES:
         raise HTTPException(
@@ -1174,9 +1174,9 @@ def uninstall_zim(file_id: str):
     Remove an installed ZIM file from disk and from the manifest.
 
     This is the API equivalent of:
-    ``python manage_zim.py uninstall <file_id>``
+    ``python -m src.manage_zim uninstall <file_id>``
     """
-    from zim_downloader import uninstall_file as _uninstall
+    from src.zim_downloader import uninstall_file as _uninstall
 
     if not is_file_installed(file_id):
         raise HTTPException(
@@ -1209,7 +1209,7 @@ def get_zim_progress():
     - ``completed_files``  – number of individual entries finished
     - ``total_files``      – total number of entries being installed
     """
-    from zim_downloader import get_download_progress
+    from src.zim_downloader import get_download_progress
 
     progress = get_download_progress()
     active = sum(1 for p in progress.values() if p.get("status") == "downloading")
@@ -1228,7 +1228,7 @@ def get_zim_file_progress(file_id: str):
     Returns 404 if no download has been started for this file in the
     current server session.
     """
-    from zim_downloader import get_file_progress
+    from src.zim_downloader import get_file_progress
 
     progress = get_file_progress(file_id)
     if progress is None:

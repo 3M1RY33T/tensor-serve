@@ -1,4 +1,4 @@
-from bm25_index import BM25Index
+from src.bm25_index import BM25Index
 
 
 def test_bm25_search_and_get_texts():

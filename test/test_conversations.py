@@ -1,4 +1,4 @@
-from conversations import add_message, create_conversation, get_conversation_history
+from src.conversations import add_message, create_conversation, get_conversation_history
 
 
 def test_conversation_history_is_chronological_and_limited(tmp_path, monkeypatch):

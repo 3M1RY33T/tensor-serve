@@ -4,18 +4,18 @@ Tensor Serve is an **offline-first AI backend**. It downloads documentation and 
 
 ---
 
-## 1. ZIM File Manager CLI (`manage_zim.py`)
+## 1. ZIM File Manager CLI (`src/manage_zim.py`)
 
 The command-line tool for managing your local knowledge base files.
 
 ```/dev/null/shell.sh#L1-7
-python manage_zim.py list                       # List all available preset files and their sizes
-python manage_zim.py status                     # Show all installed ZIM files
-python manage_zim.py status <preset>            # Show install status for one preset (research, learn, literature, coding)
-python manage_zim.py install <file_id>          # Download a specific file by its Kiwix ID
-python manage_zim.py uninstall <file_id>        # Remove a file and its manifest entry
-python manage_zim.py install-preset <preset>    # Interactive checkbox picker for a preset's files
-python manage_zim.py install-devdocs            # Interactive checkbox picker for all 231 DevDocs entries
+python -m src.manage_zim list                       # List all available preset files and their sizes
+python -m src.manage_zim status                     # Show all installed ZIM files
+python -m src.manage_zim status <preset>            # Show install status for one preset (research, learn, literature, coding)
+python -m src.manage_zim install <file_id>          # Download a specific file by its Kiwix ID
+python -m src.manage_zim uninstall <file_id>        # Remove a file and its manifest entry
+python -m src.manage_zim install-preset <preset>    # Interactive checkbox picker for a preset's files
+python -m src.manage_zim install-devdocs            # Interactive checkbox picker for all 231 DevDocs entries
 ```
 
 - Downloads come from the **live Kiwix OPDS catalog** — always up to date
@@ -25,9 +25,9 @@ python manage_zim.py install-devdocs            # Interactive checkbox picker fo
 
 ---
 
-## 2. REST API (`main.py`)
+## 2. REST API (`src/main.py`)
 
-Start the server with: `uvicorn main:app --host 0.0.0.0 --port 8000`
+Start the server with: `uvicorn src.main:app --host 0.0.0.0 --port 8000`
 
 Interactive docs available at `http://localhost:8000/docs`
 
@@ -183,23 +183,23 @@ Query embeddings and search results are cached with an in-memory LRU cache to re
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI application and all API routes |
-| `manage_zim.py` | CLI for downloading and managing ZIM files |
-| `presets.py` | Preset definitions and configuration persistence |
-| `zim_downloader.py` | Kiwix OPDS catalog interface and download engine |
-| `ingest.py` / `multi_ingest.py` | ZIM → vector database pipeline (FAISS + BM25) |
-| `embedder.py` | Sentence-transformer embeddings |
-| `vectordb.py` | FAISS index wrapper (save/load/search/search_indices) |
-| `bm25_index.py` | BM25 keyword index wrapper (save/load/search_indices) |
-| `hybrid_search.py` | Reciprocal Rank Fusion — merges FAISS and BM25 results |
-| `query_analyzer.py` | Detects simple queries, decides whether RAG is needed, and selects `hybrid` / `faiss` / `bm25` search mode |
-| `cache.py` | In-memory LRU cache for query embeddings and search results |
-| `reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
-| `chunker.py` | 500-word overlapping text chunker |
-| `utils.py` | ZIM article iterator and HTML cleaner |
-| `ai_client.py` | HTTP client for the local LLM endpoint |
-| `conversations.py` | SQLite-backed conversation history |
-| `config.py` | Persistent JSON configuration |
+| `src/main.py` | FastAPI application and all API routes |
+| `src/manage_zim.py` | CLI for downloading and managing ZIM files |
+| `src/presets.py` | Preset definitions and configuration persistence |
+| `src/zim_downloader.py` | Kiwix OPDS catalog interface and download engine |
+| `src/ingest.py` / `src/multi_ingest.py` | ZIM -> vector database pipeline (FAISS + BM25) |
+| `src/embedder.py` | Sentence-transformer embeddings |
+| `src/vectordb.py` | FAISS index wrapper (save/load/search/search_indices) |
+| `src/bm25_index.py` | BM25 keyword index wrapper (save/load/search_indices) |
+| `src/hybrid_search.py` | Reciprocal Rank Fusion; merges FAISS and BM25 results |
+| `src/query_analyzer.py` | Detects simple queries, decides whether RAG is needed, and selects `hybrid` / `faiss` / `bm25` search mode |
+| `src/cache.py` | In-memory LRU cache for query embeddings and search results |
+| `src/reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
+| `src/chunker.py` | 500-word overlapping text chunker |
+| `src/utils.py` | ZIM article iterator and HTML cleaner |
+| `src/ai_client.py` | HTTP client for the local LLM endpoint |
+| `src/conversations.py` | SQLite-backed conversation history |
+| `src/config.py` | Persistent JSON configuration |
 | `presets.json` | Saved preset state and active preset |
 | `zim_manifest.json` | Record of all installed ZIM files |
 
@@ -298,7 +298,7 @@ curl -X PATCH http://localhost:8000/config \
 
 ```bash
 # 1. Start the server
-uvicorn main:app --reload
+uvicorn src.main:app --reload
 
 # 2. Configure AI endpoint (assuming Ollama running on port 11434)
 curl -X POST http://localhost:8000/config/set-ai-endpoint \

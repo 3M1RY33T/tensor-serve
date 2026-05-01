@@ -3,14 +3,14 @@
 Tensor Serve ZIM File Manager CLI
 
 Usage:
-    python manage_zim.py list                    # List available preset files
-    python manage_zim.py status                  # Show installation status
-    python manage_zim.py status <preset>         # Status for specific preset
-    python manage_zim.py install <file_id>       # Install a file by ID
-    python manage_zim.py uninstall <file_id>     # Uninstall a file
-    python manage_zim.py install-preset <preset> # Interactive install for preset
-    python manage_zim.py install-devdocs         # Install devdocs from full catalog
-    python manage_zim.py clean                   # Remove working files (vector DB, conversations)
+    python -m src.manage_zim list                    # List available preset files
+    python -m src.manage_zim status                  # Show installation status
+    python -m src.manage_zim status <preset>         # Status for specific preset
+    python -m src.manage_zim install <file_id>       # Install a file by ID
+    python -m src.manage_zim uninstall <file_id>     # Uninstall a file
+    python -m src.manage_zim install-preset <preset> # Interactive install for preset
+    python -m src.manage_zim install-devdocs         # Install devdocs from full catalog
+    python -m src.manage_zim clean                   # Remove working files (vector DB, conversations)
 """
 
 import argparse
@@ -21,7 +21,7 @@ import sys
 
 import questionary
 
-from zim_downloader import (
+from src.zim_downloader import (
     bytes_to_human,
     download_file,
     get_installed_files_for_preset,
@@ -83,7 +83,7 @@ def print_status(preset_id=None):
 
         if not installed:
             print(
-                "\nNo files installed yet. Use 'python manage_zim.py list' to see available files."
+                "\nNo files installed yet. Use 'python -m src.manage_zim list' to see available files."
             )
             return
 
