@@ -113,6 +113,13 @@ def test_chat_completions_forwards_without_context_when_no_user_message(monkeypa
     assert captured["json"] == payload
 
 
+def test_native_chat_routes_are_not_registered():
+    client = TestClient(app)
+
+    assert client.post("/chat", json={"message": "hello"}).status_code == 404
+    assert client.get("/conversation/example").status_code == 404
+
+
 def test_generic_v1_endpoint_is_proxied_with_query_and_body(monkeypatch):
     captured = {}
 

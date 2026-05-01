@@ -10,11 +10,11 @@ Tensor Serve is an **offline-first AI backend**. It downloads documentation and 
 2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
 3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
 4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
-5. **Chat / Proxy** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks are sent to the local LLM. Native `/chat` builds its own request; `/v1/chat/completions` injects context and proxies to the upstream AI server.
+5. **OpenAI-compatible proxy** — For `/v1/chat/completions`, the user message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → retrieved context is injected into the request before it is forwarded to the upstream AI server.
 
 ### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
 
-Search and chat requests can run **two retrievals in parallel** and merge them:
+Search requests and OpenAI-compatible chat requests can run **two retrievals in parallel** and merge them:
 
 | | FAISS (semantic) | BM25 (keyword) |
 |---|---|---|
@@ -57,9 +57,9 @@ python -m src.manage_zim install-devdocs            # Interactive checkbox picke
 
 ---
 
-## 3. REST API (`src/main.py`)
+## 3. REST API (`main.py`)
 
-Start the server with: `uvicorn src.main:app --host 0.0.0.0 --port 8000`
+Start the server with: `uvicorn main:app --host 0.0.0.0 --port 8000`
 
 Interactive docs available at `http://localhost:8000/docs`
 
@@ -70,7 +70,7 @@ Interactive docs available at `http://localhost:8000/docs`
 | `GET` | `/config` | View current AI endpoint, model, and settings |
 | `GET` | `/config/models` | List models available at the configured endpoint (or `?endpoint=<url>` to probe any URL) |
 | `POST` | `/config/set-ai-endpoint` | Set `ai_endpoint` and optionally `ai_model` (auto-detected if omitted) |
-| `PATCH` | `/config` | Update any combination of the four settings (all fields optional) |
+| `PATCH` | `/config` | Update any combination of the core settings (all fields optional) |
 
 ### Cache
 | Method | Endpoint | What it does |
@@ -109,12 +109,6 @@ Interactive docs available at `http://localhost:8000/docs`
 | `GET` | `/load?name=<db>` | Load a previously ingested database into memory |
 | `POST` | `/search` | Auto-selected retrieval (`hybrid`, `faiss`, or `bm25`) — returns top-k chunks; response includes `search_mode` |
 
-### Chat & Conversations
-| Method | Endpoint | What it does |
-|---|---|---|
-| `POST` | `/chat` | Send a message; get a context-grounded AI response with a `Sources:` block and a `sources` field in the JSON |
-| `GET` | `/conversation/{id}` | Retrieve the full history of a conversation |
-
 #### Download progress fields
 
 When a file is actively downloading, `GET /zim/progress/{file_id}` returns:
@@ -133,7 +127,7 @@ The `devdocs_all` bundle entry additionally includes `completed_files` and `tota
 ### Cleanup
 | Method | Endpoint | What it does |
 |---|---|---|
-| `POST` | `/clean` | Delete all vector DB index files, text stores, conversation history, and `__pycache__/` — preserves presets, config, and ZIM files |
+| `POST` | `/clean` | Delete all vector DB index files, text stores, BM25 indexes, and `__pycache__/` — preserves presets, config, and ZIM files |
 
 ### OpenAI-Compatible API
 | Method | Endpoint | What it does |
@@ -190,7 +184,6 @@ Generated runtime files live at the repository root:
 | `zim_manifest.json` | Record of installed ZIM files |
 | `zim_files/` | Downloaded ZIM files |
 | `*.index`, `*.pkl`, `*.bm25` | Generated FAISS, text-store, and BM25 database artifacts |
-| `conversations.db` | SQLite conversation history, when created |
 
 ## 6. Source Code
 
@@ -200,15 +193,14 @@ Application source lives in `src/`. See [`src/README.md`](src/README.md) for the
 
 ### Settings
 
-All four settings are readable via `GET /config` and writable via `PATCH /config`.
+Core settings are readable via `GET /config` and writable via `PATCH /config`.
 `ai_endpoint` and `ai_model` can also be set together with `POST /config/set-ai-endpoint`.
 
 | Setting | Default | What it controls |
 |---|---|---|
-| `ai_endpoint` | `null` | URL of the upstream local AI server (required for `/chat` and `/v1/*` proxying) |
-| `ai_model` | `null` | Default model name used by native `/chat`; `/v1/*` proxy requests keep the client's requested model |
-| `context_size` | `3` | Number of vector DB chunks retrieved as context per chat message |
-| `max_conversation_history` | `20` | Maximum messages returned by `GET /conversation/{id}` |
+| `ai_endpoint` | `null` | URL of the upstream local AI server required for `/v1/*` proxying |
+| `ai_model` | `null` | Saved model selection from endpoint auto-detection; `/v1/*` proxy requests keep the client's requested model |
+| `context_size` | `3` | Number of vector DB chunks retrieved as context per OpenAI-compatible chat request |
 
 Advanced retrieval settings are read from `config.json`:
 
@@ -250,8 +242,7 @@ curl -X PATCH http://localhost:8000/config \
   -d '{
     "ai_endpoint": "http://localhost:11434",
     "ai_model": "llama3",
-    "context_size": 5,
-    "max_conversation_history": 50
+    "context_size": 5
   }'
 ```
 
@@ -281,7 +272,7 @@ curl -X PATCH http://localhost:8000/config \
 
 ```bash
 # 1. Start the server
-uvicorn src.main:app --reload
+uvicorn main:app --reload
 
 # 2. Configure AI endpoint (assuming Ollama running on port 11434)
 curl -X POST http://localhost:8000/config/set-ai-endpoint \
@@ -305,11 +296,13 @@ curl -X POST http://localhost:8000/ingest \
 # 5. Load the database
 curl http://localhost:8000/load?name=wiki
 
-# 6. Start chatting
-curl -X POST http://localhost:8000/chat \
+# 6. Start chatting through the OpenAI-compatible proxy
+curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"message": "Who invented the telephone?"}'
-
-# 7. Get conversation history
-curl http://localhost:8000/conversation/your-conversation-id
+  -d '{
+    "model": "mistral",
+    "messages": [
+      {"role": "user", "content": "Who invented the telephone?"}
+    ]
+  }'
 ```

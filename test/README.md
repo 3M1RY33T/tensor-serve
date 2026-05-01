@@ -23,9 +23,8 @@ large ZIM ingestion. They cover the core pieces that can be checked quickly:
 | `test_query_analyzer.py` | RAG/no-RAG decisions and automatic search-mode selection |
 | `test_cache.py` | LRU caching, TTL expiry, and cached search-result keys |
 | `test_config.py` | Persistent JSON config load/save helpers |
-| `test_conversations.py` | SQLite conversation storage and chronological history retrieval |
 | `test_vectordb.py` | FAISS index save/load/search behavior |
-| `test_ai_client.py` | Prompt context deduplication and model discovery parsing |
+| `test_ai_client.py` | Model discovery parsing |
 | `test_proxy_api.py` | `/v1/*` proxy forwarding, chat context injection, and upstream response passthrough |
 | `test_presets_and_zim.py` | Custom preset lifecycle and local ZIM manifest scanning |
 
@@ -38,7 +37,7 @@ a loaded vector database.
 Start the server:
 
 ```bash
-uvicorn src.main:app --reload
+uvicorn main:app --reload
 ```
 
 Configure an AI endpoint:

@@ -8,7 +8,6 @@ DEFAULT_CONFIG = {
     "ai_endpoint": None,
     "ai_model": None,
     "context_size": 3,
-    "max_conversation_history": 20,
     "relevance_threshold": 0.05,
     "query_analysis_enabled": True,
     "reranker_enabled": False,

@@ -3,7 +3,6 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 from typing import Optional
-from uuid import uuid4
 
 import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -13,7 +12,6 @@ from pydantic import BaseModel
 from src.ai_client import AIClient
 from src.cache import query_cache
 from src.config import get_config_value, load_config, set_config_value
-from src.conversations import add_message, create_conversation, get_conversation_history
 from src.embedder import Embedder
 from src.ingest import run_ingestion
 from src.multi_ingest import run_multi_ingest
@@ -124,12 +122,6 @@ class UpdateConfigRequest(BaseModel):
     ai_endpoint: Optional[str] = None
     ai_model: Optional[str] = None
     context_size: Optional[int] = None
-    max_conversation_history: Optional[int] = None
-
-
-class ChatRequest(BaseModel):
-    message: str
-    conversation_id: str = None
 
 
 class DevdocsInstallRequest(BaseModel):
@@ -143,13 +135,6 @@ class ZimInstallRequest(BaseModel):
 class ZimInstallPresetRequest(BaseModel):
     preset_id: str
     file_ids: list = []  # specific IDs from the preset; empty = all uninstalled
-
-
-class ChatResponse(BaseModel):
-    conversation_id: str
-    user_message: str
-    ai_response: str
-    context: list
 
 
 @app.get("/health")
@@ -185,7 +170,6 @@ def get_config():
         "ai_endpoint": config.get("ai_endpoint"),
         "ai_model": config.get("ai_model"),
         "context_size": config.get("context_size", 3),
-        "max_conversation_history": config.get("max_conversation_history", 20),
     }
 
 
@@ -296,7 +280,6 @@ def update_config(req: UpdateConfigRequest):
             "ai_endpoint": config.get("ai_endpoint"),
             "ai_model": config.get("ai_model"),
             "context_size": config.get("context_size", 3),
-            "max_conversation_history": config.get("max_conversation_history", 20),
         },
     }
 
@@ -664,114 +647,6 @@ def search(req: SearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
-    if not app_state.ai_client.is_configured():
-        raise HTTPException(
-            status_code=400,
-            detail="AI endpoint not configured. Call /config/set-ai-endpoint first.",
-        )
-
-    if not app_state.db_loaded or app_state.db is None:
-        raise HTTPException(status_code=400, detail="DB not loaded. Call /load first.")
-
-    try:
-        conversation_id = req.conversation_id or str(uuid4())
-
-        try:
-            get_conversation_history(conversation_id)
-        except Exception:
-            create_conversation(conversation_id)
-
-        from src.hybrid_search import hybrid_search
-        from src.query_analyzer import QueryAnalyzer
-
-        # Check if query needs RAG
-        query_analysis_enabled = get_config_value("query_analysis_enabled")
-        if query_analysis_enabled is None:
-            query_analysis_enabled = True
-
-        context = []
-        if query_analysis_enabled:
-            needs_rag, reason = QueryAnalyzer.needs_rag(req.message)
-        else:
-            needs_rag = True
-            reason = "query_analysis_disabled"
-
-        if needs_rag and app_state.db_loaded:
-            context_size = get_config_value("context_size") or 3
-            relevance_threshold = get_config_value("relevance_threshold") or 0.05
-            reranker_enabled = get_config_value("reranker_enabled")
-            if reranker_enabled is None:
-                reranker_enabled = False
-            
-            # Select optimal search mode
-            search_mode = QueryAnalyzer.select_search_mode(req.message)
-            
-            # Check cache first
-            cached_embedding = query_cache.get_embedding(req.message)
-            if cached_embedding is not None:
-                query_embedding = cached_embedding
-            else:
-                query_embedding = app_state.embedder.encode([req.message])[0]
-                query_cache.cache_embedding(req.message, query_embedding)
-            
-            # Adaptive context: retrieve more candidates and filter by relevance
-            context = hybrid_search(
-                query=req.message,
-                query_embedding=query_embedding,
-                vectordb=app_state.db,
-                bm25_index=app_state.bm25,
-                top_k=context_size,
-                candidate_k=max(context_size * 3, 10),
-                relevance_threshold=relevance_threshold,
-                search_mode=search_mode,
-            )
-            
-            # Re-rank results if enabled
-            if reranker_enabled and context:
-                from src.reranker import rerank_results
-                context = rerank_results(
-                    query=req.message,
-                    documents=context,
-                    top_k=context_size,
-                    reranker_enabled=True,
-                )
-            
-            # Cache search results
-            query_cache.cache_search_result(req.message, search_mode, context_size, context)
-
-        ai_response = app_state.ai_client.chat(req.message, context)
-
-        context_str = "\n".join(context) if context else None
-        add_message(conversation_id, "user", req.message, context_str)
-        add_message(conversation_id, "assistant", ai_response)
-
-        return ChatResponse(
-            conversation_id=conversation_id,
-            user_message=req.message,
-            ai_response=ai_response,
-            context=context,
-        )
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/conversation/{conversation_id}")
-def get_conversation(conversation_id: str):
-    try:
-        limit = get_config_value("max_conversation_history") or 20
-        history = get_conversation_history(conversation_id, limit=limit)
-        return {"conversation_id": conversation_id, "messages": history}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 def _require_ai_endpoint() -> str:
     """Return configured upstream AI endpoint or raise a client-facing error."""
     if not app_state.ai_client.is_configured():
@@ -1029,13 +904,12 @@ async def proxy_v1(path: str, request: Request):
 @app.post("/clean")
 def clean_working_files():
     """
-    Remove all working files generated by ingestion and chat sessions.
+    Remove all working files generated by ingestion.
 
     Deletes:
     - Vector database index files (*.index)
     - Vector database text stores (*.pkl)
     - BM25 keyword index files (*.bm25)
-    - Conversation history (conversations.db)
     - Python bytecode cache (__pycache__/)
 
     Preserves:
@@ -1055,15 +929,6 @@ def clean_working_files():
                 removed.append(path)
             except Exception as e:
                 errors.append({"file": path, "error": str(e)})
-
-    # Remove conversation history database
-    conv_db = "conversations.db"
-    if os.path.exists(conv_db):
-        try:
-            os.remove(conv_db)
-            removed.append(conv_db)
-        except Exception as e:
-            errors.append({"file": conv_db, "error": str(e)})
 
     # Remove __pycache__ directory
     if os.path.isdir("__pycache__"):

@@ -9,13 +9,13 @@ orientation inside `src/`.
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI application, lifespan setup, app state, and API routes |
+| `../main.py` | FastAPI application, lifespan setup, app state, and API routes |
 | `manage_zim.py` | CLI for downloading, listing, uninstalling, and cleaning ZIM-related working files |
 
 Run these entry points from the repository root:
 
 ```bash
-uvicorn src.main:app --host 0.0.0.0 --port 8000
+uvicorn main:app --host 0.0.0.0 --port 8000
 python -m src.manage_zim status
 ```
 
@@ -28,7 +28,6 @@ python -m src.manage_zim status
 | `cache.py` | In-memory LRU cache for query embeddings and search results |
 | `chunker.py` | 500-word overlapping text chunking |
 | `config.py` | Persistent JSON configuration helpers |
-| `conversations.py` | SQLite-backed conversation history |
 | `embedder.py` | SentenceTransformer embedding wrapper, preferring locally cached model files |
 | `hybrid_search.py` | Reciprocal Rank Fusion for merging FAISS and BM25 results |
 | `ingest.py` | Single-ZIM ingestion pipeline |
@@ -48,5 +47,5 @@ python -m src.manage_zim status
 - **Hybrid retrieval**: `hybrid_search.py` merges FAISS and BM25 rankings with Reciprocal Rank Fusion.
 - **Query routing**: `query_analyzer.py` decides whether retrieval is needed and chooses `hybrid`, `faiss`, or `bm25`.
 - **Optional reranking**: `reranker.py` can run a cross-encoder pass over retrieved chunks.
-- **LLM forwarding**: `ai_client.py` handles native chat calls, while `main.py` proxies OpenAI-compatible `/v1/*` traffic.
-- **State**: `config.py`, `presets.py`, `conversations.py`, and `zim_downloader.py` manage JSON, SQLite, and manifest-backed state.
+- **LLM forwarding**: `main.py` proxies OpenAI-compatible `/v1/*` traffic to the configured upstream endpoint.
+- **State**: `config.py`, `presets.py`, and `zim_downloader.py` manage JSON and manifest-backed state.

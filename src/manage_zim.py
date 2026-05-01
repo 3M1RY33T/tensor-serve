@@ -10,7 +10,7 @@ Usage:
     python -m src.manage_zim uninstall <file_id>     # Uninstall a file
     python -m src.manage_zim install-preset <preset> # Interactive install for preset
     python -m src.manage_zim install-devdocs         # Install devdocs from full catalog
-    python -m src.manage_zim clean                   # Remove working files (vector DB, conversations)
+    python -m src.manage_zim clean                   # Remove generated index files and caches
 """
 
 import argparse
@@ -213,7 +213,6 @@ def clean_working_files():
     print("  • Vector DB index files (*.index)")
     print("  • Vector DB text stores (*.pkl)")
     print("  • BM25 keyword index files (*.bm25)")
-    print("  • Conversation history (conversations.db)")
     print("  • Python bytecode cache (__pycache__/)")
     print("\nThis will NOT remove:")
     print("  • presets.json, config.json, zim_manifest.json")
@@ -230,10 +229,6 @@ def clean_working_files():
         for path in sorted(glob.glob(pattern)):
             os.remove(path)
             removed.append(path)
-
-    if os.path.exists("conversations.db"):
-        os.remove("conversations.db")
-        removed.append("conversations.db")
 
     if os.path.isdir("__pycache__"):
         shutil.rmtree("__pycache__")
@@ -293,7 +288,7 @@ def main():
     # Clean command
     subparsers.add_parser(
         "clean",
-        help="Remove working files (*.index, *.pkl, conversations.db, __pycache__/)",
+        help="Remove working files (*.index, *.pkl, *.bm25, __pycache__/)",
     )
 
     args = parser.parse_args()

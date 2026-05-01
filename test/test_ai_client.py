@@ -12,18 +12,6 @@ class FakeResponse:
         return self._payload
 
 
-def test_build_prompt_deduplicates_context():
-    client = AIClient()
-
-    prompt = client._build_prompt(
-        "What is Python?",
-        ["Python is a language.", "Python is a language.", "It is widely used."],
-    )
-
-    assert prompt.count("Python is a language.") == 1
-    assert "Question: What is Python?" in prompt
-
-
 def test_list_models_uses_openai_compatible_endpoint(monkeypatch):
     def fake_get(url, timeout):
         assert url == "http://local.test/v1/models"
