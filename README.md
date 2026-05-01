@@ -1,10 +1,42 @@
-Tensor Serve
+# Tensor Serve
 
 Tensor Serve is an **offline-first AI backend**. It downloads documentation and knowledge bases as ZIM files, builds a local semantic vector database from them, and uses that database to give an AI model relevant context when answering questions — while keeping your data private.
 
 ---
 
-## 1. ZIM File Manager CLI (`src/manage_zim.py`)
+## 1. How the AI pipeline works
+
+1. **Download** — ZIM files fetched from Kiwix and stored in `zim_files/`
+2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
+3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
+4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
+5. **Chat / Proxy** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks are sent to the local LLM. Native `/chat` builds its own request; `/v1/chat/completions` injects context and proxies to the upstream AI server.
+
+### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
+
+Search and chat requests can run **two retrievals in parallel** and merge them:
+
+| | FAISS (semantic) | BM25 (keyword) |
+|---|---|---|
+| Finds | Conceptually related chunks | Exact term / token matches |
+| Good for | *"How does backpressure work?"* | *"asyncio.gather"*, error codes, API names |
+| Index file | `{name}.index` + `{name}.pkl` | `{name}.bm25` |
+
+Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in both lists float to the top. The pipeline degrades gracefully — if only one index is available it is used alone.
+
+The query analyzer automatically selects the search strategy:
+
+| Mode | When it is used |
+|---|---|
+| `hybrid` | Mixed or general queries where semantic and keyword signals both help |
+| `faiss` | Conceptual queries such as explanations, architecture, patterns, and design questions |
+| `bm25` | Keyword-heavy queries such as API names, code symbols, methods, classes, errors, and short exact searches |
+
+Query embeddings and search results are cached with an in-memory LRU cache to reduce repeated embedding and retrieval work. If enabled, the optional cross-encoder reranker performs a second-stage pass over retrieved chunks before context is sent to the model.
+
+---
+
+## 2. ZIM File Manager CLI (`src/manage_zim.py`)
 
 The command-line tool for managing your local knowledge base files.
 
@@ -25,7 +57,7 @@ python -m src.manage_zim install-devdocs            # Interactive checkbox picke
 
 ---
 
-## 2. REST API (`src/main.py`)
+## 3. REST API (`src/main.py`)
 
 Start the server with: `uvicorn src.main:app --host 0.0.0.0 --port 8000`
 
@@ -134,7 +166,7 @@ All other `/v1/*` routes are forwarded unchanged. If no vector database is loade
 
 ---
 
-## 3. Built-in Presets
+## 4. Built-in Presets
 
 Four curated knowledge bases, each automatically selecting text-only ZIM variants:
 
@@ -144,38 +176,6 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 | `learn` | Wikiversity, Wikibooks | ~5 GB |
 | `literature` | Project Gutenberg, Wikibooks | ~63 GB |
 | `coding` | Stack Overflow, All DevDocs (231 entries) | ~80 GB + ~588 MB |
-
----
-
-## 4. How the AI pipeline works
-
-1. **Download** — ZIM files fetched from Kiwix and stored in `zim_files/`
-2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
-3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
-4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
-5. **Chat / Proxy** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks are sent to the local LLM. Native `/chat` builds its own request; `/v1/chat/completions` injects context and proxies to the upstream AI server.
-
-### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
-
-Search and chat requests can run **two retrievals in parallel** and merge them:
-
-| | FAISS (semantic) | BM25 (keyword) |
-|---|---|---|
-| Finds | Conceptually related chunks | Exact term / token matches |
-| Good for | *"How does backpressure work?"* | *"asyncio.gather"*, error codes, API names |
-| Index file | `{name}.index` + `{name}.pkl` | `{name}.bm25` |
-
-Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in both lists float to the top. The pipeline degrades gracefully — if only one index is available it is used alone.
-
-The query analyzer automatically selects the search strategy:
-
-| Mode | When it is used |
-|---|---|
-| `hybrid` | Mixed or general queries where semantic and keyword signals both help |
-| `faiss` | Conceptual queries such as explanations, architecture, patterns, and design questions |
-| `bm25` | Keyword-heavy queries such as API names, code symbols, methods, classes, errors, and short exact searches |
-
-Query embeddings and search results are cached with an in-memory LRU cache to reduce repeated embedding and retrieval work. If enabled, the optional cross-encoder reranker performs a second-stage pass over retrieved chunks before context is sent to the model.
 
 ---
 
