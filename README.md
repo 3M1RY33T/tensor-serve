@@ -179,29 +179,22 @@ Query embeddings and search results are cached with an in-memory LRU cache to re
 
 ---
 
-## 5. Key files
+## 5. Runtime Files
 
-| File | Purpose |
+Generated runtime files live at the repository root:
+
+| File or directory | Purpose |
 |---|---|
-| `src/main.py` | FastAPI application and all API routes |
-| `src/manage_zim.py` | CLI for downloading and managing ZIM files |
-| `src/presets.py` | Preset definitions and configuration persistence |
-| `src/zim_downloader.py` | Kiwix OPDS catalog interface and download engine |
-| `src/ingest.py` / `src/multi_ingest.py` | ZIM -> vector database pipeline (FAISS + BM25) |
-| `src/embedder.py` | Sentence-transformer embeddings |
-| `src/vectordb.py` | FAISS index wrapper (save/load/search/search_indices) |
-| `src/bm25_index.py` | BM25 keyword index wrapper (save/load/search_indices) |
-| `src/hybrid_search.py` | Reciprocal Rank Fusion; merges FAISS and BM25 results |
-| `src/query_analyzer.py` | Detects simple queries, decides whether RAG is needed, and selects `hybrid` / `faiss` / `bm25` search mode |
-| `src/cache.py` | In-memory LRU cache for query embeddings and search results |
-| `src/reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
-| `src/chunker.py` | 500-word overlapping text chunker |
-| `src/utils.py` | ZIM article iterator and HTML cleaner |
-| `src/ai_client.py` | HTTP client for the local LLM endpoint |
-| `src/conversations.py` | SQLite-backed conversation history |
-| `src/config.py` | Persistent JSON configuration |
+| `config.json` | Current AI endpoint, model, and retrieval settings |
 | `presets.json` | Saved preset state and active preset |
-| `zim_manifest.json` | Record of all installed ZIM files |
+| `zim_manifest.json` | Record of installed ZIM files |
+| `zim_files/` | Downloaded ZIM files |
+| `*.index`, `*.pkl`, `*.bm25` | Generated FAISS, text-store, and BM25 database artifacts |
+| `conversations.db` | SQLite conversation history, when created |
+
+## 6. Source Code
+
+Application source lives in `src/`. See [`src/README.md`](src/README.md) for the module map and code-level architecture notes.
 
 ---
 
@@ -263,16 +256,6 @@ curl -X PATCH http://localhost:8000/config \
 ```
 
 ---
-
-## Architecture
-
-- **Embedder**: Uses `sentence-transformers` (all-MiniLM-L6-v2) for semantic embeddings
-- **Vector DB**: FAISS index for efficient similarity search
-- **BM25 Index**: `rank-bm25` keyword index built from the same text chunks as FAISS
-- **Hybrid Search**: Reciprocal Rank Fusion merges FAISS and BM25 ranked lists — no tuning required
-- **AI Client**: HTTP client for communicating with local LLM endpoint
-- **Conversations**: SQLite database for tracking message history
-- **Config**: JSON file for persistent settings
 
 ## Error Handling
 
