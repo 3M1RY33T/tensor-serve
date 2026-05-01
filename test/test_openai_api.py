@@ -2,7 +2,7 @@
 Manual smoke script for OpenAI-compatible API endpoints.
 
 Run this after:
-1. Starting the server: uvicorn main:app --reload
+1. Starting the server: uvicorn src.main:app --reload
 2. Configuring an AI endpoint: curl -X POST http://localhost:8000/config/set-ai-endpoint ...
 3. Loading a database: curl http://localhost:8000/load?name=...
 
@@ -231,7 +231,7 @@ def main():
     results["health"] = check_health()
     if not results["health"]:
         print_error("\nServer is not reachable. Start the server with:")
-        print("  uvicorn main:app --reload")
+        print("  uvicorn src.main:app --reload")
         return
 
     results["v1_models"] = check_v1_models()

@@ -4,18 +4,18 @@ Tensor Serve is an **offline-first AI backend**. It downloads documentation and 
 
 ---
 
-## 1. ZIM File Manager CLI (`manage_zim.py`)
+## 1. ZIM File Manager CLI (`src/manage_zim.py`)
 
 The command-line tool for managing your local knowledge base files.
 
 ```/dev/null/shell.sh#L1-7
-python manage_zim.py list                       # List all available preset files and their sizes
-python manage_zim.py status                     # Show all installed ZIM files
-python manage_zim.py status <preset>            # Show install status for one preset (research, learn, literature, coding)
-python manage_zim.py install <file_id>          # Download a specific file by its Kiwix ID
-python manage_zim.py uninstall <file_id>        # Remove a file and its manifest entry
-python manage_zim.py install-preset <preset>    # Interactive checkbox picker for a preset's files
-python manage_zim.py install-devdocs            # Interactive checkbox picker for all 231 DevDocs entries
+python -m src.manage_zim list                       # List all available preset files and their sizes
+python -m src.manage_zim status                     # Show all installed ZIM files
+python -m src.manage_zim status <preset>            # Show install status for one preset (research, learn, literature, coding)
+python -m src.manage_zim install <file_id>          # Download a specific file by its Kiwix ID
+python -m src.manage_zim uninstall <file_id>        # Remove a file and its manifest entry
+python -m src.manage_zim install-preset <preset>    # Interactive checkbox picker for a preset's files
+python -m src.manage_zim install-devdocs            # Interactive checkbox picker for all 231 DevDocs entries
 ```
 
 - Downloads come from the **live Kiwix OPDS catalog** — always up to date
@@ -25,9 +25,9 @@ python manage_zim.py install-devdocs            # Interactive checkbox picker fo
 
 ---
 
-## 2. REST API (`main.py`)
+## 2. REST API (`src/main.py`)
 
-Start the server with: `uvicorn main:app --host 0.0.0.0 --port 8000`
+Start the server with: `uvicorn src.main:app --host 0.0.0.0 --port 8000`
 
 Interactive docs available at `http://localhost:8000/docs`
 
@@ -106,18 +106,20 @@ The `devdocs_all` bundle entry additionally includes `completed_files` and `tota
 ### OpenAI-Compatible API
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/v1/models` | Returns the configured model in OpenAI format — used by editors for auto-discovery |
-| `POST` | `/v1/chat/completions` | OpenAI-compatible chat endpoint with automatic query analysis and RAG on the last user message; transparently injects retrieved context when needed and returns responses in standard OpenAI format |
+| `GET` | `/v1/models` | Proxies model discovery to the configured upstream AI server |
+| `POST` | `/v1/chat/completions` | RAG proxy for OpenAI-compatible chat; injects retrieved context when available, then forwards to the upstream AI server |
+| `*` | `/v1/{path}` | Pass-through proxy for other OpenAI-compatible endpoints such as embeddings, responses, audio, or provider-specific routes |
 
-**How it works**: When you send a message to `/v1/chat/completions`, the endpoint automatically:
-1. Extracts the last user message
-2. Analyzes whether retrieval is needed and selects `hybrid`, `faiss`, or `bm25`
-3. Uses cached embeddings/results when available, otherwise retrieves relevant context chunks
-4. Optionally reranks retrieved chunks, then injects context as a system message
-5. Sends the full conversation to the configured LLM
-6. Returns the response in OpenAI format
+**How the RAG proxy works**: When you send a message to `/v1/chat/completions`, Tensor Serve automatically:
+1. Reads the original request body without converting it into a local response schema
+2. Extracts the last user message
+3. Analyzes whether retrieval is needed and selects `hybrid`, `faiss`, or `bm25`
+4. Uses cached embeddings/results when available, otherwise retrieves relevant context chunks
+5. Optionally reranks retrieved chunks, then prepends a context system message
+6. Forwards the modified request to the configured upstream endpoint's `/v1/chat/completions`
+7. Returns the upstream response body, status code, and content type directly to the client
 
-The client sees a normal LLM response with no awareness of the query analysis, cache, retrieval, or reranking pipeline — context enhancement is completely transparent.
+All other `/v1/*` routes are forwarded unchanged. If no vector database is loaded, or if query analysis decides retrieval is unnecessary, chat requests are forwarded without context injection. This keeps Tensor Serve focused on offline context while the local AI server remains responsible for its own API surface.
 
 **Point any OpenAI-compatible tool at `http://localhost:8000/v1`** (or `http://localhost:8000` for tools that auto-discover models):
 
@@ -151,7 +153,7 @@ Four curated knowledge bases, each automatically selecting text-only ZIM variant
 2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
 3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
 4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
-5. **Chat** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks + message are sent to the local LLM. Available via `/chat` (native format) or `/v1/chat/completions` (OpenAI-compatible integration)
+5. **Chat / Proxy** — User message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → chunks are sent to the local LLM. Native `/chat` builds its own request; `/v1/chat/completions` injects context and proxies to the upstream AI server.
 
 ### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
 
@@ -177,29 +179,22 @@ Query embeddings and search results are cached with an in-memory LRU cache to re
 
 ---
 
-## 5. Key files
+## 5. Runtime Files
 
-| File | Purpose |
+Generated runtime files live at the repository root:
+
+| File or directory | Purpose |
 |---|---|
-| `main.py` | FastAPI application and all API routes |
-| `manage_zim.py` | CLI for downloading and managing ZIM files |
-| `presets.py` | Preset definitions and configuration persistence |
-| `zim_downloader.py` | Kiwix OPDS catalog interface and download engine |
-| `ingest.py` / `multi_ingest.py` | ZIM → vector database pipeline (FAISS + BM25) |
-| `embedder.py` | Sentence-transformer embeddings |
-| `vectordb.py` | FAISS index wrapper (save/load/search/search_indices) |
-| `bm25_index.py` | BM25 keyword index wrapper (save/load/search_indices) |
-| `hybrid_search.py` | Reciprocal Rank Fusion — merges FAISS and BM25 results |
-| `query_analyzer.py` | Detects simple queries, decides whether RAG is needed, and selects `hybrid` / `faiss` / `bm25` search mode |
-| `cache.py` | In-memory LRU cache for query embeddings and search results |
-| `reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
-| `chunker.py` | 500-word overlapping text chunker |
-| `utils.py` | ZIM article iterator and HTML cleaner |
-| `ai_client.py` | HTTP client for the local LLM endpoint |
-| `conversations.py` | SQLite-backed conversation history |
-| `config.py` | Persistent JSON configuration |
+| `config.json` | Current AI endpoint, model, and retrieval settings |
 | `presets.json` | Saved preset state and active preset |
-| `zim_manifest.json` | Record of all installed ZIM files |
+| `zim_manifest.json` | Record of installed ZIM files |
+| `zim_files/` | Downloaded ZIM files |
+| `*.index`, `*.pkl`, `*.bm25` | Generated FAISS, text-store, and BM25 database artifacts |
+| `conversations.db` | SQLite conversation history, when created |
+
+## 6. Source Code
+
+Application source lives in `src/`. See [`src/README.md`](src/README.md) for the module map and code-level architecture notes.
 
 ---
 
@@ -210,8 +205,8 @@ All four settings are readable via `GET /config` and writable via `PATCH /config
 
 | Setting | Default | What it controls |
 |---|---|---|
-| `ai_endpoint` | `null` | URL of local LLM server (required for `/chat`) |
-| `ai_model` | `null` | Model name passed to the LLM (required for `/chat`) |
+| `ai_endpoint` | `null` | URL of the upstream local AI server (required for `/chat` and `/v1/*` proxying) |
+| `ai_model` | `null` | Default model name used by native `/chat`; `/v1/*` proxy requests keep the client's requested model |
 | `context_size` | `3` | Number of vector DB chunks retrieved as context per chat message |
 | `max_conversation_history` | `20` | Maximum messages returned by `GET /conversation/{id}` |
 
@@ -262,16 +257,6 @@ curl -X PATCH http://localhost:8000/config \
 
 ---
 
-## Architecture
-
-- **Embedder**: Uses `sentence-transformers` (all-MiniLM-L6-v2) for semantic embeddings
-- **Vector DB**: FAISS index for efficient similarity search
-- **BM25 Index**: `rank-bm25` keyword index built from the same text chunks as FAISS
-- **Hybrid Search**: Reciprocal Rank Fusion merges FAISS and BM25 ranked lists — no tuning required
-- **AI Client**: HTTP client for communicating with local LLM endpoint
-- **Conversations**: SQLite database for tracking message history
-- **Config**: JSON file for persistent settings
-
 ## Error Handling
 
 - **400**: Bad request (DB not loaded, AI not configured, invalid input)
@@ -296,7 +281,7 @@ curl -X PATCH http://localhost:8000/config \
 
 ```bash
 # 1. Start the server
-uvicorn main:app --reload
+uvicorn src.main:app --reload
 
 # 2. Configure AI endpoint (assuming Ollama running on port 11434)
 curl -X POST http://localhost:8000/config/set-ai-endpoint \

@@ -1,4 +1,4 @@
-from utils import clean_text
+from src.utils import clean_text
 
 
 def test_clean_text():

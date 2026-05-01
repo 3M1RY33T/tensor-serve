@@ -3,7 +3,7 @@ import difflib
 
 import requests
 
-from config import get_config_value
+from src.config import get_config_value
 
 
 class AIClient:

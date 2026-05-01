@@ -1,6 +1,6 @@
 import json
 
-import config as cfg
+import src.config as cfg
 
 
 def test_config_load_save(tmp_path):
