@@ -52,7 +52,7 @@ def check_health():
             print_success("Server is running")
             print(f"  - DB loaded: {data.get('db_loaded')}")
             print(f"  - AI configured: {data.get('ai_configured')}")
-            print(f"  - Active preset: {data.get('active_preset')}")
+            print(f"  - Active collection: {data.get('active_collection')}")
             return True
         print_error(f"Health check failed: {resp.status_code}")
         return False

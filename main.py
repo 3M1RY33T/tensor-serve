@@ -15,22 +15,28 @@ from src.config import get_config_value, load_config, set_config_value
 from src.embedder import Embedder
 from src.ingest import run_ingestion
 from src.multi_ingest import run_multi_ingest
-from src.presets import (
-    create_custom_preset,
-    delete_custom_preset,
-    get_active_preset,
-    get_all_presets,
-    get_preset,
-    get_preset_with_installation_status,
-    init_presets,
-    set_active_preset,
+from src.collections import (
+    create_custom_collection,
+    delete_custom_collection,
+    get_active_collection,
+    get_all_collections,
+    get_collection,
+    get_collection_with_installation_status,
+    init_collections,
+    set_active_collection,
 )
 from src.vectordb import VectorDB
 from src.zim_downloader import (
+    ZIM_FOLDER,
     bytes_to_human,
-    get_preset_installation_status,
+    clear_zim_source_folder,
+    get_collection_installation_status,
+    get_zim_source_folder,
+    has_custom_zim_source_folder,
     is_file_installed,
     list_installed_files,
+    register_zim_file,
+    set_zim_source_folder,
 )
 
 
@@ -41,7 +47,7 @@ class AppState:
         self.bm25 = None
         self.db_loaded = False
         self.ai_client = AIClient()
-        self.active_preset = None
+        self.active_collection = None
 
 
 app_state = AppState()
@@ -50,13 +56,13 @@ app_state = AppState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app_state.embedder = Embedder()
-    init_presets()
-    app_state.active_preset = get_active_preset()
+    init_collections()
+    app_state.active_collection = get_active_collection()
 
-    # Auto-load the active preset's database if it was already ingested
-    if app_state.active_preset:
-        preset_id = app_state.active_preset["id"]
-        db_name = f"{preset_id}_db"
+    # Auto-load the active collection's database if it was already ingested
+    if app_state.active_collection:
+        collection_id = app_state.active_collection["id"]
+        db_name = f"{collection_id}_db"
         if os.path.exists(f"{db_name}.index") and os.path.exists(f"{db_name}.pkl"):
             try:
                 app_state.db = VectorDB(dim=384)
@@ -101,8 +107,8 @@ class MultiIngestRequest(BaseModel):
     output_name: str = "combined_db"
 
 
-class CustomPresetRequest(BaseModel):
-    preset_id: str
+class CustomCollectionRequest(BaseModel):
+    collection_id: str
     name: str
     description: str
     zim_paths: list
@@ -122,6 +128,7 @@ class UpdateConfigRequest(BaseModel):
     ai_endpoint: Optional[str] = None
     ai_model: Optional[str] = None
     context_size: Optional[int] = None
+    zim_source_folder: Optional[str] = None
 
 
 class DevdocsInstallRequest(BaseModel):
@@ -132,9 +139,19 @@ class ZimInstallRequest(BaseModel):
     file_ids: list  # one or more Kiwix file IDs to download
 
 
-class ZimInstallPresetRequest(BaseModel):
-    preset_id: str
-    file_ids: list = []  # specific IDs from the preset; empty = all uninstalled
+class ZimInstallCollectionRequest(BaseModel):
+    collection_id: str
+    file_ids: list = []  # specific IDs from the collection; empty = all uninstalled
+
+
+class ZimSourceFolderRequest(BaseModel):
+    path: str
+
+
+class ZimRegisterRequest(BaseModel):
+    path: str
+    file_id: Optional[str] = None
+    title: Optional[str] = None
 
 
 @app.get("/health")
@@ -144,8 +161,8 @@ def health_check():
         "db_loaded": app_state.db_loaded,
         "bm25_loaded": app_state.bm25 is not None,
         "ai_configured": app_state.ai_client.is_configured(),
-        "active_preset": app_state.active_preset["id"]
-        if app_state.active_preset
+        "active_collection": app_state.active_collection["id"]
+        if app_state.active_collection
         else None,
     }
 
@@ -170,6 +187,7 @@ def get_config():
         "ai_endpoint": config.get("ai_endpoint"),
         "ai_model": config.get("ai_model"),
         "context_size": config.get("context_size", 3),
+        "zim_source_folder": config.get("zim_source_folder"),
     }
 
 
@@ -262,7 +280,16 @@ def update_config(req: UpdateConfigRequest):
         raise HTTPException(status_code=400, detail="No fields provided to update")
 
     for key, value in updates.items():
-        set_config_value(key, value)
+        if key == "zim_source_folder":
+            try:
+                if value:
+                    set_zim_source_folder(value)
+                else:
+                    clear_zim_source_folder()
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        else:
+            set_config_value(key, value)
 
     # Keep the live AI client in sync if connection settings changed
     if "ai_endpoint" in updates or "ai_model" in updates:
@@ -280,65 +307,74 @@ def update_config(req: UpdateConfigRequest):
             "ai_endpoint": config.get("ai_endpoint"),
             "ai_model": config.get("ai_model"),
             "context_size": config.get("context_size", 3),
+            "zim_source_folder": config.get("zim_source_folder"),
         },
     }
 
 
-@app.get("/presets")
-def list_presets():
-    all_presets = get_all_presets()
+@app.get("/collections")
+def list_collections():
+    all_collections = get_all_collections()
     return {
-        "presets": {
-            preset_id: {
-                "name": preset["name"],
-                "description": preset["description"],
-                "category": preset["category"],
-                "file_count": len(preset.get("zim_files", [])),
+        "collections": {
+            collection_id: {
+                "name": collection["name"],
+                "description": collection["description"],
+                "category": collection["category"],
+                "file_count": len(collection.get("zim_files", [])),
             }
-            for preset_id, preset in all_presets.items()
+            for collection_id, collection in all_collections.items()
         },
-        "active": app_state.active_preset["id"] if app_state.active_preset else None,
+        "active": (
+            app_state.active_collection["id"] if app_state.active_collection else None
+        ),
     }
 
 
-@app.get("/presets/{preset_id}")
-def get_preset_details(preset_id: str):
-    preset = get_preset_with_installation_status(preset_id)
-    if not preset:
-        raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
+@app.get("/collections/{collection_id}")
+def get_collection_details(collection_id: str):
+    collection = get_collection_with_installation_status(collection_id)
+    if not collection:
+        raise HTTPException(
+            status_code=404, detail=f"Collection '{collection_id}' not found"
+        )
 
     response = {
-        "id": preset_id,
-        "name": preset["name"],
-        "description": preset["description"],
-        "category": preset["category"],
+        "id": collection_id,
+        "name": collection["name"],
+        "description": collection["description"],
+        "category": collection["category"],
     }
 
-    if preset.get("category") == "preset":
-        response["files"] = preset.get("files_with_status", preset.get("zim_files", []))
+    if collection.get("category") == "collection":
+        response["files"] = collection.get(
+            "files_with_status", collection.get("zim_files", [])
+        )
     else:
-        response["zim_files"] = preset.get("zim_files", [])
+        response["zim_files"] = collection.get("zim_files", [])
 
     return response
 
 
-@app.post("/presets/{preset_id}/ingest")
-def ingest_preset(preset_id: str, zim_file_indices: list = None):
-    preset = get_preset(preset_id)
-    if not preset:
-        raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
+@app.post("/collections/{collection_id}/ingest")
+def ingest_collection(collection_id: str, zim_file_indices: list = None):
+    collection = get_collection(collection_id)
+    if not collection:
+        raise HTTPException(
+            status_code=404, detail=f"Collection '{collection_id}' not found"
+        )
 
     try:
-        if preset.get("category") == "preset":
-            # For built-in presets, resolve paths from the manifest via
+        if collection.get("category") == "collection":
+            # For built-in collections, resolve paths from the manifest via
             # zim_downloader so that updated IDs (e.g. devdocs_all) are
-            # honoured instead of the stale IDs stored in presets.py.
-            from src.zim_downloader import get_installed_files_for_preset as _get_paths
+            # honoured instead of the stale IDs stored in collections.py.
+            from src.zim_downloader import get_installed_files_for_collection as _get_paths
 
-            zim_paths = _get_paths(preset_id)
+            zim_paths = _get_paths(collection_id)
         else:
-            # Custom presets store absolute paths directly in the definition.
-            zim_files = preset.get("zim_files", [])
+            # Custom collections store absolute paths directly in the definition.
+            zim_files = collection.get("zim_files", [])
             if zim_file_indices:
                 zim_files = [
                     zim_files[i] for i in zim_file_indices if i < len(zim_files)
@@ -349,19 +385,19 @@ def ingest_preset(preset_id: str, zim_file_indices: list = None):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"No installed ZIM files found for preset '{preset_id}'. "
-                    "Install files first with: python -m src.manage_zim install-preset "
-                    f"{preset_id}"
+                    f"No installed ZIM files found for collection '{collection_id}'. "
+                    "Install files first with: python -m src.manage_zim install-collection "
+                    f"{collection_id}"
                 ),
             )
 
-        db_name = f"{preset_id}_db"
+        db_name = f"{collection_id}_db"
         result = run_multi_ingest(zim_paths, db_name)
 
-        set_active_preset(preset_id)
-        app_state.active_preset = {"id": preset_id, "preset": preset}
+        set_active_collection(collection_id)
+        app_state.active_collection = {"id": collection_id, "collection": collection}
 
-        return {**result, "preset_id": preset_id, "db_name": db_name}
+        return {**result, "collection_id": collection_id, "db_name": db_name}
 
     except HTTPException:
         raise
@@ -369,13 +405,15 @@ def ingest_preset(preset_id: str, zim_file_indices: list = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/presets/custom/create")
-def create_preset(req: CustomPresetRequest):
+@app.post("/collections/custom/create")
+def create_collection(req: CustomCollectionRequest):
     try:
-        create_custom_preset(req.preset_id, req.name, req.description, req.zim_paths)
+        create_custom_collection(
+            req.collection_id, req.name, req.description, req.zim_paths
+        )
         return {
             "status": "created",
-            "preset_id": req.preset_id,
+            "collection_id": req.collection_id,
             "name": req.name,
             "file_count": len(req.zim_paths),
         }
@@ -383,16 +421,67 @@ def create_preset(req: CustomPresetRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/presets/custom/{preset_id}")
-def delete_preset(preset_id: str):
-    if delete_custom_preset(preset_id):
-        if app_state.active_preset and app_state.active_preset["id"] == preset_id:
-            app_state.active_preset = None
-        return {"status": "deleted", "preset_id": preset_id}
+@app.delete("/collections/custom/{collection_id}")
+def delete_collection(collection_id: str):
+    if delete_custom_collection(collection_id):
+        if (
+            app_state.active_collection
+            and app_state.active_collection["id"] == collection_id
+        ):
+            app_state.active_collection = None
+        return {"status": "deleted", "collection_id": collection_id}
     else:
         raise HTTPException(
-            status_code=404, detail="Preset not found or is a built-in preset"
+            status_code=404, detail="Collection not found or is a built-in collection"
         )
+
+
+@app.get("/zim/source-folder")
+def get_zim_source_folder_details():
+    """Show the folder used for ZIM downloads and scans."""
+    return {
+        "path": get_zim_source_folder(),
+        "custom": has_custom_zim_source_folder(),
+        "default": os.path.abspath(ZIM_FOLDER),
+    }
+
+
+@app.put("/zim/source-folder")
+def update_zim_source_folder(req: ZimSourceFolderRequest):
+    """Point Tensor Serve at a folder that already contains local ZIM files."""
+    try:
+        path = set_zim_source_folder(req.path)
+        return {
+            "status": "updated",
+            "path": path,
+            "custom": True,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/zim/source-folder")
+def reset_zim_source_folder():
+    """Reset ZIM storage to the default repository-local zim_files folder."""
+    return {
+        "status": "reset",
+        "path": clear_zim_source_folder(),
+        "custom": False,
+    }
+
+
+@app.post("/zim/register")
+def register_existing_zim(req: ZimRegisterRequest):
+    """Register one existing .zim path in the manifest without downloading it."""
+    try:
+        info = register_zim_file(req.path, req.file_id, req.title)
+        return {
+            "status": "registered",
+            "file_id": info["id"],
+            "file": info,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/zim/installed")
@@ -412,10 +501,10 @@ def list_installed_zim():
     }
 
 
-@app.get("/zim/status/{preset_id}")
-def get_zim_installation_status(preset_id: str):
-    """Get ZIM installation status for a preset."""
-    status = get_preset_installation_status(preset_id)
+@app.get("/zim/status/{collection_id}")
+def get_zim_installation_status(collection_id: str):
+    """Get ZIM installation status for a collection."""
+    status = get_collection_installation_status(collection_id)
     if "error" in status:
         raise HTTPException(status_code=404, detail=status["error"])
     return status
@@ -429,8 +518,8 @@ def list_available_zim():
     available = list_available_files()
     result = {}
 
-    for preset_id, files in available.items():
-        result[preset_id] = {
+    for collection_id, files in available.items():
+        result[collection_id] = {
             "files": [
                 {
                     "id": f["id"],
@@ -913,10 +1002,10 @@ def clean_working_files():
     - Python bytecode cache (__pycache__/)
 
     Preserves:
-    - presets.json  (preset configuration)
+    - collections.json  (collection configuration)
     - config.json   (AI endpoint settings)
     - zim_manifest.json (installed ZIM record)
-    - zim_files/    (downloaded ZIM files)
+    - configured ZIM source folder files
     """
     removed = []
     errors = []
@@ -979,40 +1068,40 @@ def install_zim(req: ZimInstallRequest, background_tasks: BackgroundTasks):
     }
 
 
-@app.post("/zim/install-preset")
-def install_preset_zim(req: ZimInstallPresetRequest, background_tasks: BackgroundTasks):
+@app.post("/zim/install-collection")
+def install_collection_zim(req: ZimInstallCollectionRequest, background_tasks: BackgroundTasks):
     """
-    Queue ZIM downloads for a preset's files.
+    Queue ZIM downloads for a collection's files.
 
-    Pass specific ``file_ids`` to install only a subset of the preset's files.
-    Leave ``file_ids`` empty to queue every uninstalled file in the preset.
+    Pass specific ``file_ids`` to install only a subset of the collection's files.
+    Leave ``file_ids`` empty to queue every uninstalled file in the collection.
 
     This is the API equivalent of:
-    ``python -m src.manage_zim install-preset <preset>``
+    ``python -m src.manage_zim install-collection <collection>``
     """
-    from src.zim_downloader import PRESET_FILES
+    from src.zim_downloader import COLLECTION_FILES
     from src.zim_downloader import download_file as _dl
 
-    if req.preset_id not in PRESET_FILES:
+    if req.collection_id not in COLLECTION_FILES:
         raise HTTPException(
             status_code=404,
-            detail=f"Preset '{req.preset_id}' not found. "
-            f"Valid options: {', '.join(PRESET_FILES)}",
+            detail=f"Collection '{req.collection_id}' not found. "
+            f"Valid options: {', '.join(COLLECTION_FILES)}",
         )
 
-    preset_files = PRESET_FILES[req.preset_id]
+    collection_files = COLLECTION_FILES[req.collection_id]
 
     if req.file_ids:
-        valid_ids = {f["id"] for f in preset_files}
+        valid_ids = {f["id"] for f in collection_files}
         invalid = [fid for fid in req.file_ids if fid not in valid_ids]
         if invalid:
             raise HTTPException(
                 status_code=400,
-                detail=f"File IDs not part of preset '{req.preset_id}': {invalid}",
+                detail=f"File IDs not part of collection '{req.collection_id}': {invalid}",
             )
-        to_check = [f for f in preset_files if f["id"] in req.file_ids]
+        to_check = [f for f in collection_files if f["id"] in req.file_ids]
     else:
-        to_check = preset_files
+        to_check = collection_files
 
     queued = []
     already_installed = []
@@ -1026,7 +1115,7 @@ def install_preset_zim(req: ZimInstallPresetRequest, background_tasks: Backgroun
 
     return {
         "status": "queued" if queued else "nothing_to_do",
-        "preset_id": req.preset_id,
+        "collection_id": req.collection_id,
         "queued": queued,
         "queued_count": len(queued),
         "already_installed": already_installed,

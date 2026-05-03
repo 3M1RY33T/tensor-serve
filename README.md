@@ -6,9 +6,9 @@ Tensor Serve is an **offline-first AI backend**. It downloads documentation and 
 
 ## 1. How the AI pipeline works
 
-1. **Download** — ZIM files fetched from Kiwix and stored in `zim_files/`
+1. **Download** — ZIM files fetched from Kiwix and stored in the configured ZIM source folder (`zim_files/` by default)
 2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
-3. **Auto-load** — On server startup, the last active preset's FAISS and BM25 indexes are loaded automatically
+3. **Auto-load** — On server startup, the last active collection's FAISS and BM25 indexes are loaded automatically
 4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
 5. **OpenAI-compatible proxy** — For `/v1/chat/completions`, the user message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → retrieved context is injected into the request before it is forwarded to the upstream AI server.
 
@@ -41,19 +41,40 @@ Query embeddings and search results are cached with an in-memory LRU cache to re
 The command-line tool for managing your local knowledge base files.
 
 ```/dev/null/shell.sh#L1-7
-python -m src.manage_zim list                       # List all available preset files and their sizes
+python -m src.manage_zim list                       # List all available collection files and their sizes
 python -m src.manage_zim status                     # Show all installed ZIM files
-python -m src.manage_zim status <preset>            # Show install status for one preset (research, learn, literature, coding)
+python -m src.manage_zim status <collection>            # Show install status for one collection (research, learn, literature, coding)
 python -m src.manage_zim install <file_id>          # Download a specific file by its Kiwix ID
 python -m src.manage_zim uninstall <file_id>        # Remove a file and its manifest entry
-python -m src.manage_zim install-preset <preset>    # Interactive checkbox picker for a preset's files
+python -m src.manage_zim install-collection <collection>    # Interactive checkbox picker for a collection's files
 python -m src.manage_zim install-devdocs            # Interactive checkbox picker for all 231 DevDocs entries
 ```
 
-- Downloads come from the **live Kiwix OPDS catalog** — always up to date
+- Downloads are resolved through the **live Kiwix OPDS catalog**; archive freshness depends on what Kiwix publishes
 - Prefers **text-only (`nopic`) flavours** automatically to keep sizes small
 - Downloads show a **live progress bar** (`████░░ 45.2%  210 MB / 465 MB`)
 - Tracks all installed files in `zim_manifest.json`
+- Use `PUT /zim/source-folder` to point Tensor Serve at an existing folder of ZIM files instead of creating `zim_files/`
+
+If you already have `.zim` files elsewhere, point Tensor Serve at that folder before listing or installing files:
+
+```bash
+curl -X PUT http://localhost:8000/zim/source-folder \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/data/zim"}'
+```
+
+You can also register a single existing ZIM file without changing the source folder:
+
+```bash
+curl -X POST http://localhost:8000/zim/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "/data/zim/stackoverflow.com_en_all.zim",
+    "file_id": "stackoverflow.com_en_all",
+    "title": "Stack Overflow"
+  }'
+```
 
 ---
 
@@ -66,7 +87,7 @@ Interactive docs available at `http://localhost:8000/docs`
 ### Health & Configuration
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/health` | Server status, whether DB is loaded, active preset |
+| `GET` | `/health` | Server status, whether DB is loaded, active collection |
 | `GET` | `/config` | View current AI endpoint, model, and settings |
 | `GET` | `/config/models` | List models available at the configured endpoint (or `?endpoint=<url>` to probe any URL) |
 | `POST` | `/config/set-ai-endpoint` | Set `ai_endpoint` and optionally `ai_model` (auto-detected if omitted) |
@@ -78,23 +99,27 @@ Interactive docs available at `http://localhost:8000/docs`
 | `GET` | `/cache/stats` | View query embedding and search-result cache statistics |
 | `POST` | `/cache/clear` | Clear all cached query embeddings and search results |
 
-### Presets
+### Collections
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/presets` | List all presets (built-in + custom) and which is active |
-| `GET` | `/presets/{preset_id}` | Details and file installation status for one preset |
-| `POST` | `/presets/{preset_id}/ingest` | Process a preset's ZIM files into a vector database |
-| `POST` | `/presets/custom/create` | Create a custom preset from your own ZIM file paths |
-| `DELETE` | `/presets/custom/{preset_id}` | Delete a custom preset |
+| `GET` | `/collections` | List all collections (built-in + custom) and which is active |
+| `GET` | `/collections/{collection_id}` | Details and file installation status for one collection |
+| `POST` | `/collections/{collection_id}/ingest` | Process a collection's ZIM files into a vector database |
+| `POST` | `/collections/custom/create` | Create a custom collection from your own ZIM file paths |
+| `DELETE` | `/collections/custom/{collection_id}` | Delete a custom collection |
 
 ### ZIM File Management
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/zim/available` | List all preset files with installed/not-installed status |
+| `GET` | `/zim/available` | List all collection files with installed/not-installed status |
 | `GET` | `/zim/installed` | List every installed ZIM file with path and size (scans disk, auto-registers untracked files) |
-| `GET` | `/zim/status/{preset_id}` | Per-file install status for a preset |
+| `GET` | `/zim/source-folder` | Show the active ZIM source folder |
+| `PUT` | `/zim/source-folder` | Point Tensor Serve at an existing folder of `.zim` files |
+| `DELETE` | `/zim/source-folder` | Reset ZIM storage to the default `zim_files/` folder |
+| `POST` | `/zim/register` | Register one existing `.zim` file path in the manifest without downloading it |
+| `GET` | `/zim/status/{collection_id}` | Per-file install status for a collection |
 | `POST` | `/zim/install` | Queue one or more ZIM files for background download by Kiwix ID |
-| `POST` | `/zim/install-preset` | Queue all (or selected) files from a preset for background download |
+| `POST` | `/zim/install-collection` | Queue all (or selected) files from a collection for background download |
 | `DELETE` | `/zim/uninstall/{file_id}` | Remove a ZIM file from disk and the manifest |
 | `GET` | `/zim/devdocs` | Live catalog of all 231 DevDocs entries from Kiwix |
 | `POST` | `/zim/devdocs/install` | Queue DevDocs downloads in the background (specific IDs or all) |
@@ -127,7 +152,7 @@ The `devdocs_all` bundle entry additionally includes `completed_files` and `tota
 ### Cleanup
 | Method | Endpoint | What it does |
 |---|---|---|
-| `POST` | `/clean` | Delete all vector DB index files, text stores, BM25 indexes, and `__pycache__/` — preserves presets, config, and ZIM files |
+| `POST` | `/clean` | Delete all vector DB index files, text stores, BM25 indexes, and `__pycache__/` — preserves collections, config, manifest, and ZIM files |
 
 ### OpenAI-Compatible API
 | Method | Endpoint | What it does |
@@ -160,11 +185,11 @@ All other `/v1/*` routes are forwarded unchanged. If no vector database is loade
 
 ---
 
-## 4. Built-in Presets
+## 4. Built-in Collections
 
 Four curated knowledge bases, each automatically selecting text-only ZIM variants:
 
-| Preset | Contents | Approx. size |
+| Collection | Contents | Approx. size |
 |---|---|---|
 | `research` | Wikipedia, Wikisource, Wikinews | ~65 GB |
 | `learn` | Wikiversity, Wikibooks | ~5 GB |
@@ -180,9 +205,9 @@ Generated runtime files live at the repository root:
 | File or directory | Purpose |
 |---|---|
 | `config.json` | Current AI endpoint, model, and retrieval settings |
-| `presets.json` | Saved preset state and active preset |
+| `collections.json` | Saved collection state and active collection |
 | `zim_manifest.json` | Record of installed ZIM files |
-| `zim_files/` | Downloaded ZIM files |
+| `zim_files/` | Default downloaded ZIM folder, created only when no custom `zim_source_folder` is configured |
 | `*.index`, `*.pkl`, `*.bm25` | Generated FAISS, text-store, and BM25 database artifacts |
 
 ## 6. Source Code
@@ -201,6 +226,7 @@ Core settings are readable via `GET /config` and writable via `PATCH /config`.
 | `ai_endpoint` | `null` | URL of the upstream local AI server required for `/v1/*` proxying |
 | `ai_model` | `null` | Saved model selection from endpoint auto-detection; `/v1/*` proxy requests keep the client's requested model |
 | `context_size` | `3` | Number of vector DB chunks retrieved as context per OpenAI-compatible chat request |
+| `zim_source_folder` | `null` | Optional folder to scan for existing `.zim` files and use for future downloads |
 
 Advanced retrieval settings are read from `config.json`:
 
@@ -242,8 +268,28 @@ curl -X PATCH http://localhost:8000/config \
   -d '{
     "ai_endpoint": "http://localhost:11434",
     "ai_model": "llama3",
-    "context_size": 5
+    "context_size": 5,
+    "zim_source_folder": "/data/zim"
   }'
+```
+
+**Example — reset ZIM storage to the default `zim_files/` folder:**
+```bash
+curl -X DELETE http://localhost:8000/zim/source-folder
+```
+
+**Example — create and ingest a custom collection from local ZIM paths:**
+```bash
+curl -X POST http://localhost:8000/collections/custom/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "collection_id": "local_docs",
+    "name": "Local Docs",
+    "description": "My local documentation set",
+    "zim_paths": ["/data/zim/docs.zim"]
+  }'
+
+curl -X POST http://localhost:8000/collections/local_docs/ingest
 ```
 
 ---

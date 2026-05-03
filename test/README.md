@@ -26,7 +26,7 @@ large ZIM ingestion. They cover the core pieces that can be checked quickly:
 | `test_vectordb.py` | FAISS index save/load/search behavior |
 | `test_ai_client.py` | Model discovery parsing |
 | `test_proxy_api.py` | `/v1/*` proxy forwarding, chat context injection, and upstream response passthrough |
-| `test_presets_and_zim.py` | Custom preset lifecycle and local ZIM manifest scanning |
+| `test_collections_and_zim.py` | Custom collection lifecycle, collection/ZIM API routes, custom ZIM source folders, and local ZIM manifest scanning |
 
 ## Manual API smoke test
 
