@@ -31,8 +31,8 @@ python -m src.manage_zim status
 | `embedder.py` | SentenceTransformer embedding wrapper, preferring locally cached model files |
 | `hybrid_search.py` | Reciprocal Rank Fusion for merging FAISS and BM25 results |
 | `ingest.py` | Single-ZIM ingestion pipeline |
-| `multi_ingest.py` | Multi-ZIM ingestion pipeline for combined databases and collections |
-| `collections.py` | Built-in/custom collection definitions and active-collection persistence |
+| `multi_ingest.py` | Multi-ZIM ingestion pipeline for combined databases from files or directories |
+| `collections.py` | Collection folder discovery, metadata, and active-collection persistence |
 | `query_analyzer.py` | RAG/no-RAG decisions and search-mode selection |
 | `reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
 | `utils.py` | ZIM article iteration and HTML/text cleanup helpers |
@@ -48,4 +48,4 @@ python -m src.manage_zim status
 - **Query routing**: `query_analyzer.py` decides whether retrieval is needed and chooses `hybrid`, `faiss`, or `bm25`.
 - **Optional reranking**: `reranker.py` can run a cross-encoder pass over retrieved chunks.
 - **LLM forwarding**: `main.py` proxies OpenAI-compatible `/v1/*` traffic to the configured upstream endpoint.
-- **State**: `config.py`, `collections.py`, and `zim_downloader.py` manage JSON and manifest-backed state. Collection state is stored in `collections.json`; ZIM storage can use a configured source folder instead of the default `zim_files/`.
+- **State**: `config.py`, `collections.py`, and `zim_downloader.py` manage JSON and manifest-backed state. Collection metadata is stored in `collections.json`; collection folders contain lightweight links to ZIM files in the active source folder.

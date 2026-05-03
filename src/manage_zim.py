@@ -3,12 +3,12 @@
 Tensor Serve ZIM File Manager CLI
 
 Usage:
-    python -m src.manage_zim list                    # List available collection files
+    python -m src.manage_zim list                    # List available category files
     python -m src.manage_zim status                  # Show installation status
-    python -m src.manage_zim status <collection>         # Status for specific collection
+    python -m src.manage_zim status <category>          # Status for a category
     python -m src.manage_zim install <file_id>       # Install a file by ID
     python -m src.manage_zim uninstall <file_id>     # Uninstall a file
-    python -m src.manage_zim install-collection <collection> # Interactive install for collection
+    python -m src.manage_zim install-category <category>   # Interactive install for a category
     python -m src.manage_zim install-devdocs         # Install devdocs from full catalog
     python -m src.manage_zim clean                   # Remove generated index files and caches
 """
@@ -24,7 +24,7 @@ import questionary
 from src.zim_downloader import (
     bytes_to_human,
     download_file,
-    get_collection_installation_status,
+    get_category_installation_status,
     get_zim_source_folder,
     is_file_installed,
     list_available_files,
@@ -35,15 +35,15 @@ from src.zim_downloader import (
 
 
 def print_available():
-    """Print available collection files grouped by collection."""
+    """Print available files grouped by category."""
     available = list_available_files()
 
     print("\n" + "=" * 80)
     print("AVAILABLE ZIM FILES FOR TENSOR SERVE".center(80))
     print("=" * 80)
 
-    for collection_id, files in available.items():
-        print(f"\n📚 {collection_id.upper()}")
+    for category_id, files in available.items():
+        print(f"\n📚 {category_id}")
         print("-" * 80)
         for file_info in files:
             print(f"  ID:          {file_info['id']}")
@@ -53,16 +53,16 @@ def print_available():
             print()
 
 
-def print_status(collection_id=None):
+def print_status(category_id=None):
     """Print installation status."""
-    if collection_id:
-        status = get_collection_installation_status(collection_id)
+    if category_id:
+        status = get_category_installation_status(category_id)
         if "error" in status:
             print(f"✗ {status['error']}")
             return
 
         print(f"\n{'=' * 80}")
-        print(f"Installation Status: {collection_id.upper()}".center(80))
+        print(f"Installation Status: {category_id}".center(80))
         print("=" * 80)
 
         for file in status["files"]:
@@ -93,22 +93,22 @@ def print_status(collection_id=None):
             print(f"  Path: {info['path']}")
 
 
-def interactive_install_collection(collection_id):
-    """Interactively install files for a collection."""
-    status = get_collection_installation_status(collection_id)
+def interactive_install_category(category_id):
+    """Interactively install files for a curated category."""
+    status = get_category_installation_status(category_id)
 
     if "error" in status:
         print(f"✗ {status['error']}")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"INSTALL {collection_id.upper()} COLLECTION".center(80))
+    print(f"INSTALL {category_id} CATEGORY".center(80))
     print("=" * 80)
 
     uninstalled = [f for f in status["files"] if not f["installed"]]
 
     if not uninstalled:
-        print(f"\n✓ All files for '{collection_id}' are already installed!")
+        print(f"\n✓ All files for '{category_id}' are already installed!")
         return
 
     choices = [
@@ -252,14 +252,14 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # List command
-    subparsers.add_parser("list", help="List available collection ZIM files")
+    subparsers.add_parser("list", help="List available category ZIM files")
 
     # Status command
     status_parser = subparsers.add_parser("status", help="Show installation status")
     status_parser.add_argument(
-        "collection",
+        "category",
         nargs="?",
-        help="Specific collection to check (research, learn, literature, coding)",
+        help="Specific category to check (Research, Learning, Literature, Coding)",
     )
 
     # Install command
@@ -270,13 +270,13 @@ def main():
     uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall a ZIM file")
     uninstall_parser.add_argument("file_id", help="File ID to uninstall")
 
-    # Install collection command
-    install_collection_parser = subparsers.add_parser(
-        "install-collection", help="Interactively install files for a collection"
+    # Install category command
+    install_category_parser = subparsers.add_parser(
+        "install-category", help="Interactively install files for a category"
     )
-    install_collection_parser.add_argument(
-        "collection",
-        help="Collection ID (research, learn, literature, coding)",
+    install_category_parser.add_argument(
+        "category",
+        help="Category ID (Research, Learning, Literature, Coding)",
     )
 
     # Install devdocs command
@@ -301,7 +301,7 @@ def main():
         print_available()
 
     elif args.command == "status":
-        print_status(args.collection)
+        print_status(args.category)
 
     elif args.command == "install":
         if download_file(args.file_id):
@@ -315,8 +315,8 @@ def main():
         else:
             sys.exit(1)
 
-    elif args.command == "install-collection":
-        interactive_install_collection(args.collection)
+    elif args.command == "install-category":
+        interactive_install_category(args.category)
 
     elif args.command == "install-devdocs":
         interactive_install_devdocs()

@@ -41,12 +41,12 @@ Query embeddings and search results are cached with an in-memory LRU cache to re
 The command-line tool for managing your local knowledge base files.
 
 ```/dev/null/shell.sh#L1-7
-python -m src.manage_zim list                       # List all available collection files and their sizes
+python -m src.manage_zim list                       # List all available category files and their sizes
 python -m src.manage_zim status                     # Show all installed ZIM files
-python -m src.manage_zim status <collection>            # Show install status for one collection (research, learn, literature, coding)
+python -m src.manage_zim status <category>          # Show install status for one category
 python -m src.manage_zim install <file_id>          # Download a specific file by its Kiwix ID
 python -m src.manage_zim uninstall <file_id>        # Remove a file and its manifest entry
-python -m src.manage_zim install-collection <collection>    # Interactive checkbox picker for a collection's files
+python -m src.manage_zim install-category <category> # Interactive checkbox picker for a category's files
 python -m src.manage_zim install-devdocs            # Interactive checkbox picker for all 231 DevDocs entries
 ```
 
@@ -54,7 +54,7 @@ python -m src.manage_zim install-devdocs            # Interactive checkbox picke
 - Prefers **text-only (`nopic`) flavours** automatically to keep sizes small
 - Downloads show a **live progress bar** (`████░░ 45.2%  210 MB / 465 MB`)
 - Tracks all installed files in `zim_manifest.json`
-- Use `PUT /zim/source-folder` to point Tensor Serve at an existing folder of ZIM files instead of creating `zim_files/`
+- Use `PUT /zim/source-folder` to point Tensor Serve at an existing folder of ZIM files, `zim_files/` will be created in the project root if not configured.
 
 If you already have `.zim` files elsewhere, point Tensor Serve at that folder before listing or installing files:
 
@@ -102,24 +102,31 @@ Interactive docs available at `http://localhost:8000/docs`
 ### Collections
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/collections` | List all collections (built-in + custom) and which is active |
-| `GET` | `/collections/{collection_id}` | Details and file installation status for one collection |
-| `POST` | `/collections/{collection_id}/ingest` | Process a collection's ZIM files into a vector database |
-| `POST` | `/collections/custom/create` | Create a custom collection from your own ZIM file paths |
-| `DELETE` | `/collections/custom/{collection_id}` | Delete a custom collection |
+| `GET` | `/collections` | List collection folders in the active ZIM source folder |
+| `GET` | `/collections/{collection_id}` | Details and ZIM files for one collection folder |
+| `GET` | `/collections/{collection_id}/files` | List the ZIM files referenced by one collection folder |
+| `POST` | `/collections` | Create a collection folder, optionally adding selected ZIM files |
+| `PATCH` | `/collections/{collection_id}` | Rename a collection or update its description |
+| `POST` | `/collections/{collection_id}/files` | Add additional `.zim` files to a collection without duplicating archives |
+| `DELETE` | `/collections/{collection_id}/files` | Delete selected `.zim` files from a collection folder |
+| `POST` | `/collections/{collection_id}/ingest` | Process all ZIM files in a collection folder into a vector database |
+| `DELETE` | `/collections/{collection_id}` | Delete collection metadata and the collection folder |
+| `POST` | `/collections/custom/create` | Legacy alias for `POST /collections` |
+| `DELETE` | `/collections/custom/{collection_id}` | Legacy alias for `DELETE /collections/{collection_id}` |
 
 ### ZIM File Management
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/zim/available` | List all collection files with installed/not-installed status |
+| `GET` | `/zim/available` | List curated category files with installed/not-installed status |
 | `GET` | `/zim/installed` | List every installed ZIM file with path and size (scans disk, auto-registers untracked files) |
 | `GET` | `/zim/source-folder` | Show the active ZIM source folder |
 | `PUT` | `/zim/source-folder` | Point Tensor Serve at an existing folder of `.zim` files |
 | `DELETE` | `/zim/source-folder` | Reset ZIM storage to the default `zim_files/` folder |
 | `POST` | `/zim/register` | Register one existing `.zim` file path in the manifest without downloading it |
-| `GET` | `/zim/status/{collection_id}` | Per-file install status for a collection |
+| `POST` | `/zim/source-folder/ingest` | Ingest every `.zim` file under the active source folder |
+| `GET` | `/zim/status/{collection_id}` | Per-file status for a collection folder |
 | `POST` | `/zim/install` | Queue one or more ZIM files for background download by Kiwix ID |
-| `POST` | `/zim/install-collection` | Queue all (or selected) files from a collection for background download |
+| `POST` | `/zim/install-category` | Queue all or selected files from a curated category |
 | `DELETE` | `/zim/uninstall/{file_id}` | Remove a ZIM file from disk and the manifest |
 | `GET` | `/zim/devdocs` | Live catalog of all 231 DevDocs entries from Kiwix |
 | `POST` | `/zim/devdocs/install` | Queue DevDocs downloads in the background (specific IDs or all) |
@@ -129,8 +136,8 @@ Interactive docs available at `http://localhost:8000/docs`
 ### Vector Database
 | Method | Endpoint | What it does |
 |---|---|---|
-| `POST` | `/ingest` | Ingest a single ZIM file into a named vector DB |
-| `POST` | `/ingest-multiple` | Ingest multiple ZIM files into one combined vector DB |
+| `POST` | `/ingest` | Ingest a single ZIM file or a directory of ZIM files into a named vector DB |
+| `POST` | `/ingest-multiple` | Ingest multiple ZIM files and/or directories into one combined vector DB |
 | `GET` | `/load?name=<db>` | Load a previously ingested database into memory |
 | `POST` | `/search` | Auto-selected retrieval (`hybrid`, `faiss`, or `bm25`) — returns top-k chunks; response includes `search_mode` |
 
@@ -185,16 +192,16 @@ All other `/v1/*` routes are forwarded unchanged. If no vector database is loade
 
 ---
 
-## 4. Built-in Collections
+## 4. Curated Categories
 
-Four curated knowledge bases, each automatically selecting text-only ZIM variants:
+Four curated categories are available for convenience. They help queue downloads, but they do not define what gets ingested. Ingestion reads actual `.zim` files from source-folder paths and collection folders.
 
-| Collection | Contents | Approx. size |
+| Category | Contents | Approx. size |
 |---|---|---|
-| `research` | Wikipedia, Wikisource, Wikinews | ~65 GB |
-| `learn` | Wikiversity, Wikibooks | ~5 GB |
-| `literature` | Project Gutenberg, Wikibooks | ~63 GB |
-| `coding` | Stack Overflow, All DevDocs (231 entries) | ~80 GB + ~588 MB |
+| Research | Wikipedia, Wikisource, Wikinews | ~65 GB |
+| Learning | Wikiversity, Wikibooks | ~5 GB |
+| Literature | Project Gutenberg, Wikibooks | ~63 GB |
+| Coding | Stack Overflow, All DevDocs (231 entries) | ~80 GB + ~588 MB |
 
 ---
 
@@ -205,7 +212,7 @@ Generated runtime files live at the repository root:
 | File or directory | Purpose |
 |---|---|
 | `config.json` | Current AI endpoint, model, and retrieval settings |
-| `collections.json` | Saved collection state and active collection |
+| `collections.json` | Saved collection metadata and active collection |
 | `zim_manifest.json` | Record of installed ZIM files |
 | `zim_files/` | Default downloaded ZIM folder, created only when no custom `zim_source_folder` is configured |
 | `*.index`, `*.pkl`, `*.bm25` | Generated FAISS, text-store, and BM25 database artifacts |
@@ -278,9 +285,9 @@ curl -X PATCH http://localhost:8000/config \
 curl -X DELETE http://localhost:8000/zim/source-folder
 ```
 
-**Example — create and ingest a custom collection from local ZIM paths:**
+**Example — create and ingest a collection folder from local ZIM paths:**
 ```bash
-curl -X POST http://localhost:8000/collections/custom/create \
+curl -X POST http://localhost:8000/collections \
   -H "Content-Type: application/json" \
   -d '{
     "collection_id": "local_docs",
@@ -290,6 +297,44 @@ curl -X POST http://localhost:8000/collections/custom/create \
   }'
 
 curl -X POST http://localhost:8000/collections/local_docs/ingest
+```
+
+Selected ZIM files are referenced from the collection folder with lightweight
+filesystem links. Files already inside the active ZIM source folder are linked
+in place; files outside it are copied once into the source folder root and then
+linked from collections. To create an empty collection, send an empty
+`zim_paths` list.
+
+**Example — rename a collection and add/remove files:**
+```bash
+curl -X PATCH http://localhost:8000/collections/local_docs \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Reference Docs"}'
+
+curl -X POST http://localhost:8000/collections/local_docs/files \
+  -H "Content-Type: application/json" \
+  -d '{"zim_paths": ["/data/zim/python.zim", "/data/zim/sqlite.zim"]}'
+
+curl -X DELETE http://localhost:8000/collections/local_docs/files \
+  -H "Content-Type: application/json" \
+  -d '{"file_names": ["sqlite.zim"]}'
+```
+
+**Example — ingest an entire collection folder by path:**
+```bash
+curl -X POST http://localhost:8000/ingest-multiple \
+  -H "Content-Type: application/json" \
+  -d '{
+    "zim_paths": ["/data/zim/local_docs"],
+    "output_name": "local_docs_db"
+  }'
+```
+
+**Example — ingest the entire active ZIM source folder:**
+```bash
+curl -X POST http://localhost:8000/zim/source-folder/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"output_name": "all_zims_db"}'
 ```
 
 ---

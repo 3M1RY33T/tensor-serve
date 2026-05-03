@@ -14,10 +14,10 @@ MANIFEST_FILE = "zim_manifest.json"
 KIWIX_API = "https://library.kiwix.org/catalog/v2/entries"
 _ATOM_NS = "http://www.w3.org/2005/Atom"
 
-# Mapping of collection IDs to their Kiwix <name> identifiers.
+# Mapping of category names to their Kiwix <name> identifiers.
 # Each "id" must exactly match the <name> field returned by the Kiwix OPDS catalog.
-COLLECTION_FILES = {
-    "research": [
+CATEGORY_FILES = {
+    "Research": [
         {
             "id": "wikipedia_en_all",
             "name": "Wikipedia (English)",
@@ -49,7 +49,7 @@ COLLECTION_FILES = {
             "size": "~67MB",
         },
     ],
-    "learn": [
+    "Learning": [
         {
             "id": "wikiversity_en_all",
             "name": "Wikiversity",
@@ -63,7 +63,7 @@ COLLECTION_FILES = {
             "size": "~3GB",
         },
     ],
-    "literature": [
+    "Literature": [
         {
             "id": "gutenberg_en_all",
             "name": "Project Gutenberg",
@@ -83,7 +83,7 @@ COLLECTION_FILES = {
             "size": "~80MB",
         },
     ],
-    "coding": [
+    "Coding": [
         {
             "id": "stackoverflow.com_en_all",
             "name": "Stack Overflow",
@@ -145,6 +145,68 @@ def get_zim_source_folder() -> str:
     if configured:
         return _normalize_folder(configured)
     return os.path.abspath(ZIM_FOLDER)
+
+
+def list_zim_files_in_path(path: str) -> List[str]:
+    """Return all .zim files represented by a file or directory path."""
+    zim_path = Path(path).expanduser()
+    if not zim_path.is_absolute():
+        zim_path = Path.cwd() / zim_path
+
+    if zim_path.is_file():
+        return [str(zim_path.resolve())] if zim_path.suffix == ".zim" else []
+
+    if not zim_path.is_dir():
+        return []
+
+    return sorted(
+        str(candidate.resolve())
+        for candidate in zim_path.rglob("*.zim")
+        if candidate.is_file()
+    )
+
+
+def _zim_file_identity(path: str):
+    try:
+        stat = os.stat(path)
+        return ("inode", stat.st_dev, stat.st_ino)
+    except OSError:
+        return ("path", os.path.abspath(path))
+
+
+def resolve_zim_inputs(paths: List[str]) -> List[str]:
+    """Expand a list of .zim files and/or directories into unique .zim paths."""
+    resolved = []
+    seen = set()
+    for path in paths:
+        for zim_path in list_zim_files_in_path(path):
+            identity = _zim_file_identity(zim_path)
+            if identity not in seen:
+                seen.add(identity)
+                resolved.append(zim_path)
+    return resolved
+
+
+def _manifest_id_for_zim_path(path: str) -> str:
+    """Return a stable manifest ID for a ZIM path in the source folder."""
+    zim_path = Path(path).resolve()
+    try:
+        relative = zim_path.relative_to(Path(get_zim_source_folder()).resolve())
+    except ValueError:
+        return zim_path.stem
+
+    if len(relative.parts) == 1:
+        return relative.stem
+    return "__".join(relative.with_suffix("").parts)
+
+
+def _source_path_sort_key(path: str):
+    zim_path = Path(path).resolve()
+    try:
+        relative = zim_path.relative_to(Path(get_zim_source_folder()).resolve())
+        return (len(relative.parts), str(relative))
+    except ValueError:
+        return (999, str(zim_path))
 
 
 def set_zim_source_folder(path: str) -> str:
@@ -287,8 +349,16 @@ def get_kiwix_file_info(file_id: str) -> Optional[Dict]:
 
 
 def list_available_files() -> Dict[str, List[Dict]]:
-    """Return all available files grouped by collection."""
-    return COLLECTION_FILES
+    """Return all available files grouped by category."""
+    return CATEGORY_FILES
+
+
+def normalize_category_id(category_id: str) -> Optional[str]:
+    """Return the canonical category name for a user-provided category string."""
+    for name in CATEGORY_FILES:
+        if name.lower() == category_id.lower():
+            return name
+    return None
 
 
 def scan_zim_folder() -> Dict:
@@ -313,35 +383,45 @@ def scan_zim_folder() -> Dict:
     changed = False
 
     # Normalise every existing manifest path to absolute for consistent comparison
-    tracked_paths = {os.path.abspath(v["path"]) for v in installed.values()}
+    tracked_paths = set()
+    tracked_identities = set()
 
-    # 1. Purge stale entries — file was deleted from disk
-    stale = [
-        fid
-        for fid, info in list(installed.items())
-        if not os.path.exists(os.path.abspath(info["path"]))
-    ]
+    # 1. Purge stale entries and duplicate manifest entries that point to the
+    # same archive through collection links.
+    stale = []
+    for fid, info in list(installed.items()):
+        path = os.path.abspath(info["path"])
+        if not os.path.exists(path):
+            stale.append(fid)
+            continue
+        identity = _zim_file_identity(path)
+        if identity in tracked_identities:
+            stale.append(fid)
+            continue
+        tracked_paths.add(path)
+        tracked_identities.add(identity)
+
     for fid in stale:
         del installed[fid]
         changed = True
 
     # 2. Register untracked .zim files found on disk
-    for fname in os.listdir(zim_dir):
-        if not fname.endswith(".zim"):
+    for fpath in sorted(list_zim_files_in_path(zim_dir), key=_source_path_sort_key):
+        identity = _zim_file_identity(fpath)
+        if fpath in tracked_paths or identity in tracked_identities:
             continue
-        fpath = os.path.join(zim_dir, fname)  # always absolute
-        if fpath in tracked_paths:
-            continue
-        stem = fname[:-4]  # strip .zim
         size_bytes = os.path.getsize(fpath)
-        installed[stem] = {
+        file_id = _manifest_id_for_zim_path(fpath)
+        installed[file_id] = {
+            "id": file_id,
             "path": fpath,
-            "title": stem,
+            "title": Path(fpath).stem,
             "size": bytes_to_human(size_bytes),
             "installed_at": os.path.getmtime(fpath),
             "untracked": True,
         }
         tracked_paths.add(fpath)
+        tracked_identities.add(identity)
         changed = True
 
     if changed:
@@ -401,18 +481,19 @@ def _count_installed_devdocs() -> int:
     return sum(1 for k in list_installed_files() if k.startswith("devdocs_en_"))
 
 
-def get_installed_files_for_collection(collection_id: str) -> List[str]:
-    """Return disk paths of installed files for a specific collection.
+def get_installed_files_for_collection(category_id: str) -> List[str]:
+    """Return disk paths of installed files for a specific category.
 
     For the virtual 'devdocs_all' bundle, expands to the individual paths of
     every devdocs_en_* entry present in the manifest.
     """
-    if collection_id not in COLLECTION_FILES:
+    category_id = normalize_category_id(category_id)
+    if not category_id:
         return []
 
     installed = list_installed_files()
     result = []
-    for file_info in COLLECTION_FILES[collection_id]:
+    for file_info in CATEGORY_FILES[category_id]:
         file_id = file_info["id"]
         if file_id == "devdocs_all":
             for k, v in installed.items():
@@ -603,18 +684,20 @@ def uninstall_file(file_id: str) -> bool:
         return False
 
 
-def get_collection_installation_status(collection_id: str) -> Dict:
-    """Return installation status for every file in a collection."""
-    if collection_id not in COLLECTION_FILES:
+def get_category_installation_status(category_id: str) -> Dict:
+    """Return installation status for every file in a category."""
+    requested_category = category_id
+    category_id = normalize_category_id(category_id)
+    if not category_id:
         return {
-            "error": f"Unknown collection: '{collection_id}'. "
-            f"Valid options: {', '.join(COLLECTION_FILES)}"
+            "error": f"Unknown category: '{requested_category}'. "
+            f"Valid options: {', '.join(CATEGORY_FILES)}"
         }
 
     installed_map = list_installed_files()
     files_status = []
 
-    for file_info in COLLECTION_FILES[collection_id]:
+    for file_info in CATEGORY_FILES[category_id]:
         file_id = file_info["id"]
         installed = is_file_installed(file_id)
 
@@ -634,7 +717,7 @@ def get_collection_installation_status(collection_id: str) -> Dict:
 
         files_status.append(entry)
 
-    return {"collection": collection_id, "files": files_status}
+    return {"category": category_id, "files": files_status}
 
 
 def list_devdocs_catalog() -> List[Dict]:

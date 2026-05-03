@@ -16,26 +16,31 @@ from src.embedder import Embedder
 from src.ingest import run_ingestion
 from src.multi_ingest import run_multi_ingest
 from src.collections import (
+    add_files_to_collection,
     create_custom_collection,
     delete_custom_collection,
     get_active_collection,
     get_all_collections,
     get_collection,
+    get_collection_path,
     get_collection_with_installation_status,
     init_collections,
+    remove_files_from_collection,
     set_active_collection,
+    update_collection,
 )
 from src.vectordb import VectorDB
 from src.zim_downloader import (
     ZIM_FOLDER,
     bytes_to_human,
     clear_zim_source_folder,
-    get_collection_installation_status,
     get_zim_source_folder,
     has_custom_zim_source_folder,
     is_file_installed,
     list_installed_files,
+    normalize_category_id,
     register_zim_file,
+    resolve_zim_inputs,
     set_zim_source_folder,
 )
 
@@ -61,8 +66,8 @@ async def lifespan(app: FastAPI):
 
     # Auto-load the active collection's database if it was already ingested
     if app_state.active_collection:
-        collection_id = app_state.active_collection["id"]
-        db_name = f"{collection_id}_db"
+        category_id = app_state.active_collection["id"]
+        db_name = f"{category_id}_db"
         if os.path.exists(f"{db_name}.index") and os.path.exists(f"{db_name}.pkl"):
             try:
                 app_state.db = VectorDB(dim=384)
@@ -109,9 +114,19 @@ class MultiIngestRequest(BaseModel):
 
 class CustomCollectionRequest(BaseModel):
     collection_id: str
-    name: str
-    description: str
-    zim_paths: list
+    name: Optional[str] = None
+    description: str = ""
+    zim_paths: list = []
+
+
+class CollectionUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CollectionFilesRequest(BaseModel):
+    zim_paths: list = []
+    file_names: list = []
 
 
 class SearchRequest(BaseModel):
@@ -139,9 +154,9 @@ class ZimInstallRequest(BaseModel):
     file_ids: list  # one or more Kiwix file IDs to download
 
 
-class ZimInstallCollectionRequest(BaseModel):
-    collection_id: str
-    file_ids: list = []  # specific IDs from the collection; empty = all uninstalled
+class ZimInstallCategoryRequest(BaseModel):
+    category_id: str
+    file_ids: list = []  # specific IDs from the category; empty = all uninstalled
 
 
 class ZimSourceFolderRequest(BaseModel):
@@ -152,6 +167,10 @@ class ZimRegisterRequest(BaseModel):
     path: str
     file_id: Optional[str] = None
     title: Optional[str] = None
+
+
+class ZimSourceIngestRequest(BaseModel):
+    output_name: str = "zim_source_db"
 
 
 @app.get("/health")
@@ -321,6 +340,7 @@ def list_collections():
                 "name": collection["name"],
                 "description": collection["description"],
                 "category": collection["category"],
+                "path": collection["path"],
                 "file_count": len(collection.get("zim_files", [])),
             }
             for collection_id, collection in all_collections.items()
@@ -344,16 +364,26 @@ def get_collection_details(collection_id: str):
         "name": collection["name"],
         "description": collection["description"],
         "category": collection["category"],
+        "path": collection["path"],
+        "file_count": len(collection.get("zim_files", [])),
     }
 
     if collection.get("category") == "collection":
-        response["files"] = collection.get(
-            "files_with_status", collection.get("zim_files", [])
-        )
+        response["files"] = collection.get("zim_files", [])
     else:
         response["zim_files"] = collection.get("zim_files", [])
 
     return response
+
+
+@app.get("/collections/{collection_id}/files")
+def get_collection_files(collection_id: str):
+    collection = get_collection(collection_id)
+    if not collection:
+        raise HTTPException(
+            status_code=404, detail=f"Collection '{collection_id}' not found"
+        )
+    return {"collection_id": collection_id, "files": collection.get("zim_files", [])}
 
 
 @app.post("/collections/{collection_id}/ingest")
@@ -365,29 +395,19 @@ def ingest_collection(collection_id: str, zim_file_indices: list = None):
         )
 
     try:
-        if collection.get("category") == "collection":
-            # For built-in collections, resolve paths from the manifest via
-            # zim_downloader so that updated IDs (e.g. devdocs_all) are
-            # honoured instead of the stale IDs stored in collections.py.
-            from src.zim_downloader import get_installed_files_for_collection as _get_paths
-
-            zim_paths = _get_paths(collection_id)
-        else:
-            # Custom collections store absolute paths directly in the definition.
-            zim_files = collection.get("zim_files", [])
-            if zim_file_indices:
-                zim_files = [
-                    zim_files[i] for i in zim_file_indices if i < len(zim_files)
-                ]
+        zim_files = collection.get("zim_files", [])
+        if zim_file_indices:
+            zim_files = [zim_files[i] for i in zim_file_indices if i < len(zim_files)]
             zim_paths = [f["path"] for f in zim_files if "path" in f]
+        else:
+            zim_paths = resolve_zim_inputs([get_collection_path(collection_id)])
 
         if not zim_paths:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"No installed ZIM files found for collection '{collection_id}'. "
-                    "Install files first with: python -m src.manage_zim install-collection "
-                    f"{collection_id}"
+                    f"No ZIM files found in collection '{collection_id}'. "
+                    f"Add .zim files to: {get_collection_path(collection_id)}"
                 ),
             )
 
@@ -405,25 +425,118 @@ def ingest_collection(collection_id: str, zim_file_indices: list = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/collections/custom/create")
+@app.post("/collections")
 def create_collection(req: CustomCollectionRequest):
     try:
-        create_custom_collection(
+        collection = create_custom_collection(
             req.collection_id, req.name, req.description, req.zim_paths
         )
         return {
             "status": "created",
             "collection_id": req.collection_id,
-            "name": req.name,
-            "file_count": len(req.zim_paths),
+            "name": collection["name"],
+            "path": collection["path"],
+            "file_count": len(collection.get("zim_files", [])),
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/collections/custom/{collection_id}")
+@app.post("/collections/custom/create")
+def create_collection_legacy(req: CustomCollectionRequest):
+    return create_collection(req)
+
+
+@app.patch("/collections/{collection_id}")
+def update_collection_details(collection_id: str, req: CollectionUpdateRequest):
+    if req.name is None and req.description is None:
+        raise HTTPException(
+            status_code=400, detail="Provide at least one field to update"
+        )
+    try:
+        collection = update_collection(collection_id, req.name, req.description)
+        if not collection:
+            raise HTTPException(
+                status_code=404, detail=f"Collection '{collection_id}' not found"
+            )
+        return {
+            "status": "updated",
+            "collection_id": collection_id,
+            "name": collection["name"],
+            "description": collection["description"],
+            "path": collection["path"],
+            "file_count": len(collection.get("zim_files", [])),
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/collections/{collection_id}/files")
+def add_collection_files(collection_id: str, req: CollectionFilesRequest):
+    if not req.zim_paths:
+        raise HTTPException(status_code=400, detail="Provide at least one zim_path")
+    try:
+        collection = add_files_to_collection(collection_id, req.zim_paths)
+        if not collection:
+            raise HTTPException(
+                status_code=404, detail=f"Collection '{collection_id}' not found"
+            )
+        return {
+            "status": "updated",
+            "collection_id": collection_id,
+            "files": collection.get("zim_files", []),
+            "file_count": len(collection.get("zim_files", [])),
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/collections/{collection_id}/files")
+def delete_collection_files(collection_id: str, req: CollectionFilesRequest):
+    if not req.file_names and not req.zim_paths:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one file_name or zim_path to delete",
+        )
+    try:
+        collection = remove_files_from_collection(
+            collection_id, req.file_names, req.zim_paths
+        )
+        if not collection:
+            raise HTTPException(
+                status_code=404, detail=f"Collection '{collection_id}' not found"
+            )
+        return {
+            "status": "updated",
+            "collection_id": collection_id,
+            "files": collection.get("zim_files", []),
+            "file_count": len(collection.get("zim_files", [])),
+        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/collections/{collection_id}")
 def delete_collection(collection_id: str):
-    if delete_custom_collection(collection_id):
+    try:
+        deleted = delete_custom_collection(collection_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if deleted:
         if (
             app_state.active_collection
             and app_state.active_collection["id"] == collection_id
@@ -431,9 +544,12 @@ def delete_collection(collection_id: str):
             app_state.active_collection = None
         return {"status": "deleted", "collection_id": collection_id}
     else:
-        raise HTTPException(
-            status_code=404, detail="Collection not found or is a built-in collection"
-        )
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+
+@app.delete("/collections/custom/{collection_id}")
+def delete_collection_legacy(collection_id: str):
+    return delete_collection(collection_id)
 
 
 @app.get("/zim/source-folder")
@@ -484,6 +600,22 @@ def register_existing_zim(req: ZimRegisterRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/zim/source-folder/ingest")
+def ingest_zim_source_folder(req: ZimSourceIngestRequest):
+    """Ingest every .zim file under the active ZIM source folder."""
+    zim_paths = resolve_zim_inputs([get_zim_source_folder()])
+    if not zim_paths:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No ZIM files found in source folder: {get_zim_source_folder()}",
+        )
+    try:
+        result = run_multi_ingest(zim_paths, req.output_name)
+        return {**result, "db_name": req.output_name, "file_count": len(zim_paths)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/zim/installed")
 def list_installed_zim():
     """List all installed ZIM files."""
@@ -503,11 +635,13 @@ def list_installed_zim():
 
 @app.get("/zim/status/{collection_id}")
 def get_zim_installation_status(collection_id: str):
-    """Get ZIM installation status for a collection."""
-    status = get_collection_installation_status(collection_id)
-    if "error" in status:
-        raise HTTPException(status_code=404, detail=status["error"])
-    return status
+    """Get ZIM file status for a collection folder."""
+    collection = get_collection_with_installation_status(collection_id)
+    if not collection:
+        raise HTTPException(
+            status_code=404, detail=f"Collection '{collection_id}' not found"
+        )
+    return {"collection": collection_id, "files": collection.get("zim_files", [])}
 
 
 @app.get("/zim/available")
@@ -518,8 +652,8 @@ def list_available_zim():
     available = list_available_files()
     result = {}
 
-    for collection_id, files in available.items():
-        result[collection_id] = {
+    for category_id, files in available.items():
+        result[category_id] = {
             "files": [
                 {
                     "id": f["id"],
@@ -627,8 +761,17 @@ def install_devdocs(req: DevdocsInstallRequest, background_tasks: BackgroundTask
 @app.post("/ingest")
 def ingest(req: IngestRequest):
     try:
-        result = run_ingestion(req.zim_path, req.output_name)
-        return result
+        zim_paths = resolve_zim_inputs([req.zim_path])
+        if not zim_paths:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No ZIM files found for path: {req.zim_path}",
+            )
+        if len(zim_paths) == 1:
+            return run_ingestion(zim_paths[0], req.output_name)
+        return run_multi_ingest(zim_paths, req.output_name)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -636,8 +779,16 @@ def ingest(req: IngestRequest):
 @app.post("/ingest-multiple")
 def ingest_multiple(req: MultiIngestRequest):
     try:
-        result = run_multi_ingest(req.zim_paths, req.output_name)
+        zim_paths = resolve_zim_inputs(req.zim_paths)
+        if not zim_paths:
+            raise HTTPException(
+                status_code=400,
+                detail="No ZIM files found for the provided paths",
+            )
+        result = run_multi_ingest(zim_paths, req.output_name)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1068,40 +1219,43 @@ def install_zim(req: ZimInstallRequest, background_tasks: BackgroundTasks):
     }
 
 
-@app.post("/zim/install-collection")
-def install_collection_zim(req: ZimInstallCollectionRequest, background_tasks: BackgroundTasks):
+@app.post("/zim/install-category")
+def install_category_zim(
+    req: ZimInstallCategoryRequest, background_tasks: BackgroundTasks
+):
     """
-    Queue ZIM downloads for a collection's files.
+    Queue ZIM downloads for a curated category's files.
 
-    Pass specific ``file_ids`` to install only a subset of the collection's files.
-    Leave ``file_ids`` empty to queue every uninstalled file in the collection.
+    Pass specific ``file_ids`` to install only a subset of the category's files.
+    Leave ``file_ids`` empty to queue every uninstalled file in the category.
 
     This is the API equivalent of:
-    ``python -m src.manage_zim install-collection <collection>``
+    ``python -m src.manage_zim install-category <category>``
     """
-    from src.zim_downloader import COLLECTION_FILES
+    from src.zim_downloader import CATEGORY_FILES
     from src.zim_downloader import download_file as _dl
 
-    if req.collection_id not in COLLECTION_FILES:
+    category_id = normalize_category_id(req.category_id)
+    if not category_id:
         raise HTTPException(
             status_code=404,
-            detail=f"Collection '{req.collection_id}' not found. "
-            f"Valid options: {', '.join(COLLECTION_FILES)}",
+            detail=f"Category '{req.category_id}' not found. "
+            f"Valid options: {', '.join(CATEGORY_FILES)}",
         )
 
-    collection_files = COLLECTION_FILES[req.collection_id]
+    category_files = CATEGORY_FILES[category_id]
 
     if req.file_ids:
-        valid_ids = {f["id"] for f in collection_files}
+        valid_ids = {f["id"] for f in category_files}
         invalid = [fid for fid in req.file_ids if fid not in valid_ids]
         if invalid:
             raise HTTPException(
                 status_code=400,
-                detail=f"File IDs not part of collection '{req.collection_id}': {invalid}",
+                detail=f"File IDs not part of category '{category_id}': {invalid}",
             )
-        to_check = [f for f in collection_files if f["id"] in req.file_ids]
+        to_check = [f for f in category_files if f["id"] in req.file_ids]
     else:
-        to_check = collection_files
+        to_check = category_files
 
     queued = []
     already_installed = []
@@ -1115,7 +1269,7 @@ def install_collection_zim(req: ZimInstallCollectionRequest, background_tasks: B
 
     return {
         "status": "queued" if queued else "nothing_to_do",
-        "collection_id": req.collection_id,
+        "category": category_id,
         "queued": queued,
         "queued_count": len(queued),
         "already_installed": already_installed,
