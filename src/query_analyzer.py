@@ -84,9 +84,13 @@ class QueryAnalyzer:
         Classify query type for potential optimization hints.
 
         Returns:
-            'definition' | 'how-to' | 'comparison' | 'factual' | 'general'
+            'definition' | 'how-to' | 'comparison' | 'factual' | 'general' | 'time-sensitive'
         """
         query_lower = query.lower()
+
+        # Check for time-sensitive keywords first
+        if QueryAnalyzer.is_time_sensitive(query):
+            return "time-sensitive"
 
         if any(p in query_lower for p in ["define", "what does", "what is", "mean"]):
             return "definition"
@@ -97,6 +101,60 @@ class QueryAnalyzer:
         if any(p in query_lower for p in ["when", "where", "who", "what year"]):
             return "factual"
         return "general"
+
+    @staticmethod
+    def is_time_sensitive(query: str) -> bool:
+        """
+        Detect if a query is asking about time-sensitive or recent information.
+
+        Returns:
+            True if query appears to need recent data, False otherwise
+        """
+        query_lower = query.lower()
+
+        time_sensitive_keywords = [
+            "latest",
+            "recent",
+            "today",
+            "yesterday",
+            "this week",
+            "this month",
+            "this year",
+            "2024",
+            "2025",
+            "2026",
+            "current",
+            "now",
+            "breaking",
+            "news",
+            "trending",
+            "upcoming",
+            "next week",
+            "next month",
+            "latest news",
+            "what's new",
+            "what is new",
+            "recently",
+            "just happened",
+            "just released",
+            "just announced",
+            "real-time",
+            "live",
+            "stock",
+            "price",
+            "weather",
+            "today's",
+            "covid",
+            "pandemic",
+            "election",
+            "outbreak",
+        ]
+
+        for keyword in time_sensitive_keywords:
+            if keyword in query_lower:
+                return True
+
+        return False
 
     @staticmethod
     def select_search_mode(query: str) -> str:

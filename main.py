@@ -350,6 +350,105 @@ def detect_local_ai_endpoints():
     return {"endpoints": _AIClient.detect_local_endpoints()}
 
 
+@app.post("/config/web-search/enable")
+def enable_web_search(provider: str = "duckduckgo"):
+    """
+    Enable web search for time-sensitive queries.
+    
+    Supported providers:
+    - duckduckgo: No API key required
+    - brave: Requires Brave Search API key
+    - google: Requires Google Custom Search API key and search engine ID
+    """
+    if provider not in ["duckduckgo", "brave", "google"]:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+    
+    set_config_value("web_search_enabled", True)
+    set_config_value("web_search_provider", provider)
+    
+    return {
+        "status": "enabled",
+        "provider": provider,
+        "message": f"Web search enabled with {provider}. Time-sensitive queries will include web results."
+    }
+
+
+@app.post("/config/web-search/disable")
+def disable_web_search():
+    """Disable web search, reverting to offline-only retrieval."""
+    set_config_value("web_search_enabled", False)
+    
+    return {
+        "status": "disabled",
+        "message": "Web search disabled. Only offline ZIM indexes will be used."
+    }
+
+
+@app.post("/config/web-search/set-provider")
+def set_web_search_provider(req_body: dict):
+    """
+    Set or update web search provider credentials.
+    
+    For Brave Search:
+    {
+        "provider": "brave",
+        "api_key": "your-brave-api-key"
+    }
+    
+    For Google Custom Search:
+    {
+        "provider": "google",
+        "api_key": "your-google-api-key",
+        "search_engine_id": "your-search-engine-id"
+    }
+    """
+    provider = req_body.get("provider", "duckduckgo")
+    
+    if provider == "brave":
+        api_key = req_body.get("api_key")
+        if not api_key:
+            raise HTTPException(status_code=400, detail="Brave Search requires 'api_key'")
+        from src.web_search import web_search_manager
+        web_search_manager.set_brave_api_key(api_key)
+        set_config_value("web_search_api_key", api_key)
+        return {"status": "configured", "provider": "brave"}
+    
+    elif provider == "google":
+        api_key = req_body.get("api_key")
+        search_engine_id = req_body.get("search_engine_id")
+        if not api_key or not search_engine_id:
+            raise HTTPException(status_code=400, detail="Google Search requires 'api_key' and 'search_engine_id'")
+        from src.web_search import web_search_manager
+        web_search_manager.set_google_api_key(api_key, search_engine_id)
+        set_config_value("web_search_api_key", api_key)
+        set_config_value("web_search_engine_id", search_engine_id)
+        return {"status": "configured", "provider": "google"}
+    
+    elif provider == "duckduckgo":
+        # DuckDuckGo needs no configuration
+        return {"status": "configured", "provider": "duckduckgo", "message": "DuckDuckGo requires no setup"}
+    
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
+
+@app.get("/config/web-search/status")
+def get_web_search_status():
+    """Get current web search configuration and available providers."""
+    from src.web_search import web_search_manager
+    
+    config = load_config()
+    available_providers = web_search_manager.get_available_providers()
+    
+    return {
+        "enabled": config.get("web_search_enabled", False),
+        "provider": config.get("web_search_provider", "duckduckgo"),
+        "results_per_query": config.get("web_search_results", 3),
+        "available_providers": available_providers,
+        "description": "When enabled, queries detected as time-sensitive (mentioning 'latest', 'today', 'current', etc.) will include web search results merged with ZIM indexes via Reciprocal Rank Fusion."
+    }
+
+
 @app.patch("/config")
 def update_config(req: UpdateConfigRequest):
     """
@@ -912,6 +1011,7 @@ def search(req: SearchRequest):
     try:
         from src.hybrid_search import hybrid_search
         from src.query_analyzer import QueryAnalyzer
+        from src.web_search import web_search_manager
 
         relevance_threshold = get_config_value("relevance_threshold") or 0.05
         reranker_enabled = get_config_value("reranker_enabled")
@@ -932,6 +1032,13 @@ def search(req: SearchRequest):
                 query_embedding = app_state.embedder.encode([req.query])[0]
                 query_cache.cache_embedding(req.query, query_embedding)
             
+            # Detect if query needs web search
+            web_results = None
+            web_search_enabled = get_config_value("web_search_enabled")
+            if web_search_enabled and QueryAnalyzer.is_time_sensitive(req.query):
+                web_search_results_count = get_config_value("web_search_results") or 3
+                web_results = web_search_manager.search(req.query, num_results=web_search_results_count)
+            
             results = hybrid_search(
                 query=req.query,
                 query_embedding=query_embedding,
@@ -941,6 +1048,7 @@ def search(req: SearchRequest):
                 candidate_k=max(req.top_k * 3, 10),
                 relevance_threshold=relevance_threshold,
                 search_mode=search_mode,
+                web_results=web_results,
             )
             
             # Re-rank results if enabled
@@ -1106,6 +1214,7 @@ def _context_for_query(query: str) -> list:
 
     from src.hybrid_search import hybrid_search
     from src.query_analyzer import QueryAnalyzer
+    from src.web_search import web_search_manager
 
     query_analysis_enabled = get_config_value("query_analysis_enabled")
     if query_analysis_enabled is None:
@@ -1138,6 +1247,13 @@ def _context_for_query(query: str) -> list:
         query_embedding = app_state.embedder.encode([query])[0]
         query_cache.cache_embedding(query, query_embedding)
 
+    # Detect if query needs web search
+    web_results = None
+    web_search_enabled = get_config_value("web_search_enabled")
+    if web_search_enabled and QueryAnalyzer.is_time_sensitive(query):
+        web_search_results_count = get_config_value("web_search_results") or 3
+        web_results = web_search_manager.search(query, num_results=web_search_results_count)
+
     context_chunks = hybrid_search(
         query=query,
         query_embedding=query_embedding,
@@ -1147,6 +1263,7 @@ def _context_for_query(query: str) -> list:
         candidate_k=max(context_size * 3, 10),
         relevance_threshold=relevance_threshold,
         search_mode=search_mode,
+        web_results=web_results,
     )
 
     if reranker_enabled and context_chunks:

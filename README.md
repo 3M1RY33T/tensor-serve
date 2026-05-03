@@ -1,6 +1,8 @@
 # Tensor Serve
 
-Tensor Serve is an **offline-first AI backend**. It downloads documentation and knowledge bases as ZIM files, builds a local semantic vector database from them, and uses that database to give an AI model relevant context when answering questions — while keeping your data private.
+Tensor Serve is an **offline-first, retrieval-augmented proxy** for any OpenAI-compatible AI backend. It downloads documentation and knowledge bases as ZIM files, builds a local semantic vector database from them, and uses that database to give an AI model relevant context when answering questions — while keeping your data private.
+
+**Not tied to local models**: Tensor Serve works with any OpenAI-compatible endpoint — local runtimes (Ollama, LM Studio), cloud APIs (OpenAI, Anthropic), or LLM gateways (LiteLLM, vLLM). API keys enable authentication with services that require them.
 
 ---
 
@@ -9,20 +11,25 @@ Tensor Serve is an **offline-first AI backend**. It downloads documentation and 
 1. **Download** — ZIM files fetched from Kiwix and stored in the configured ZIM source folder (`zim_files/` by default)
 2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
 3. **Auto-load** — On server startup, the last active collection's FAISS and BM25 indexes are loaded automatically
-4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`)
-5. **OpenAI-compatible proxy** — For `/v1/chat/completions`, the user message is embedded (or served from cache) → hybrid search retrieves top-k chunks → optional cross-encoder reranking improves result order → retrieved context is injected into the request before it is forwarded to the upstream AI server.
+4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`); time-sensitive queries optionally trigger web search
+5. **OpenAI-compatible proxy** — For `/v1/chat/completions`, the user message is embedded (or served from cache) → hybrid search retrieves top-k chunks (optionally merged with web results) → optional cross-encoder reranking improves result order → retrieved context is injected into the request before it is forwarded to the upstream AI server.
 
-### Hybrid search (FAISS + BM25 via Reciprocal Rank Fusion)
+### Hybrid search (FAISS + BM25 + optional Web Search via Reciprocal Rank Fusion)
 
-Search requests and OpenAI-compatible chat requests can run **two retrievals in parallel** and merge them:
+Search requests and OpenAI-compatible chat requests can run **up to three retrievals in parallel** and merge them:
 
-| | FAISS (semantic) | BM25 (keyword) |
-|---|---|---|
-| Finds | Conceptually related chunks | Exact term / token matches |
-| Good for | *"How does backpressure work?"* | *"asyncio.gather"*, error codes, API names |
-| Index file | `{name}.index` + `{name}.pkl` | `{name}.bm25` |
+| | FAISS (semantic) | BM25 (keyword) | Web Search |
+|---|---|---|---|
+| Finds | Conceptually related chunks | Exact term / token matches | Current / recent information |
+| Good for | *"How does backpressure work?"* | *"asyncio.gather"*, error codes, API names | *"latest news"*, *"today's events"*, time-sensitive queries |
+| Requires setup | Automatic | Automatic | Optional; disabled by default |
 
-Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in both lists float to the top. The pipeline degrades gracefully — if only one index is available it is used alone.
+Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in multiple result sets float to the top. The pipeline degrades gracefully — if one index is unavailable it is skipped.
+
+**Offline-first by default**: Local ZIM indexes are prioritized. Web search is:
+- **Disabled by default** — queries use only your offline knowledge base
+- **Time-sensitive queries only** — enabled only for queries mentioning recent info keywords like "latest", "today", "breaking", "current", etc.
+- **User-controlled** — opt-in via configuration endpoints
 
 The query analyzer automatically selects the search strategy:
 
@@ -253,6 +260,73 @@ Advanced retrieval settings are read from `config.json`:
 | `relevance_threshold` | `0.05` | Minimum hybrid-search relevance score required for a chunk to be included |
 | `query_analysis_enabled` | `true` | Whether simple queries can skip RAG and domain queries can auto-select search mode |
 | `reranker_enabled` | `false` | Whether retrieved chunks are passed through the optional cross-encoder reranker |
+| `web_search_enabled` | `false` | Whether web search is enabled for time-sensitive queries |
+| `web_search_provider` | `duckduckgo` | Which search provider to use (`duckduckgo`, `brave`, or `google`) |
+| `web_search_api_key` | `null` | API key for web search provider (if required) |
+| `web_search_engine_id` | `null` | Google Custom Search engine ID (only for Google provider) |
+| `web_search_results` | `3` | Number of web search results to retrieve per query |
+
+### Web Search for Time-Sensitive Information
+
+Web search is **disabled by default** and **only triggered for time-sensitive queries** that mention keywords like:
+- Recent time: "latest", "today", "yesterday", "this week", "current", "breaking", "trending", "recently"
+- Specific years: "2024", "2025", "2026"
+- Real-time info: "live", "now", "upcoming", "what's new", "real-time"
+- Current events: "news", "stock", "price", "weather", "election", "pandemic", "outbreak", etc.
+
+When enabled, time-sensitive queries retrieve results from both offline ZIM indexes and web search, then merge them via Reciprocal Rank Fusion. Local knowledge is prioritized.
+
+**Enable web search with DuckDuckGo** (no API key required):
+```bash
+curl -X POST http://localhost:8000/config/web-search/enable \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "duckduckgo"}'
+```
+
+**Enable web search with Brave Search** (requires API key):
+```bash
+# 1. Get a free Brave Search API key from https://api.search.brave.com
+# 2. Configure it:
+curl -X POST http://localhost:8000/config/web-search/set-provider \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "brave",
+    "api_key": "your-brave-api-key"
+  }'
+
+# 3. Enable web search:
+curl -X POST http://localhost:8000/config/web-search/enable \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "brave"}'
+```
+
+**Enable web search with Google Custom Search** (requires credentials):
+```bash
+# 1. Set up a custom search engine at https://programmablesearchengine.google.com
+# 2. Configure it:
+curl -X POST http://localhost:8000/config/web-search/set-provider \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "google",
+    "api_key": "your-google-api-key",
+    "search_engine_id": "your-search-engine-id"
+  }'
+
+# 3. Enable web search:
+curl -X POST http://localhost:8000/config/web-search/enable \
+  -H "Content-Type: application/json" \
+  -d '{"provider": "google"}'
+```
+
+**Check web search status**:
+```bash
+curl http://localhost:8000/config/web-search/status
+```
+
+**Disable web search**:
+```bash
+curl -X POST http://localhost:8000/config/web-search/disable
+```
 
 #### Model auto-detection
 
@@ -402,9 +476,10 @@ curl -X POST http://localhost:8000/zim/source-folder/ingest \
 - Large ZIM files (>1GB) may take 10-30 minutes to ingest
 - Both FAISS (`.index` + `.pkl`) and BM25 (`.bm25`) indexes are saved to disk and reloaded on startup — no re-ingestion needed
 - FAISS similarity search is O(1); BM25 scoring is O(n) but extremely fast in practice
-- Hybrid RRF adds negligible overhead — both searches run in milliseconds
+- Hybrid RRF adds negligible overhead — both searches run in milliseconds (or up to 3 sources with web search)
 - Chat responses depend on AI endpoint response time
 - Existing databases ingested before hybrid search was added will use semantic-only search until re-ingested (no `.bm25` file present → graceful fallback)
+- **Web search** (when enabled): adds 1-3 seconds per time-sensitive query; cached results are instant; disabled by default (zero overhead)
 
 ---
 
@@ -438,7 +513,10 @@ curl -X POST http://localhost:8000/ingest \
 # 5. Load the database
 curl http://localhost:8000/load?name=wiki
 
-# 6. Start chatting through the OpenAI-compatible proxy
+# 6. (Optional) Enable web search for time-sensitive queries
+curl -X POST http://localhost:8000/config/web-search/enable
+
+# 7. Start chatting through the OpenAI-compatible proxy
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -446,6 +524,16 @@ curl -X POST http://localhost:8000/v1/chat/completions \
     "tensor_show_resources": false,
     "messages": [
       {"role": "user", "content": "Who invented the telephone?"}
+    ]
+  }'
+
+# 8. Time-sensitive query (if web search enabled, will search web + ZIM)
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mistral",
+    "messages": [
+      {"role": "user", "content": "What is the latest news about AI?"}
     ]
   }'
 ```

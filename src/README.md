@@ -23,7 +23,7 @@ python -m src.manage_zim status
 
 | File | Purpose |
 |---|---|
-| `ai_client.py` | HTTP client for the configured local, OpenAI-compatible, or gateway-backed upstream LLM endpoint |
+| `ai_client.py` | HTTP client for any OpenAI-compatible upstream endpoint (local or cloud) with optional API key authentication |
 | `bm25_index.py` | BM25 keyword index wrapper, including save/load/search helpers |
 | `cache.py` | In-memory LRU cache for query embeddings and search results |
 | `chunker.py` | 500-word overlapping text chunking |
@@ -37,6 +37,7 @@ python -m src.manage_zim status
 | `reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
 | `utils.py` | ZIM article iteration and HTML/text cleanup helpers |
 | `vectordb.py` | FAISS index wrapper, including save/load/search helpers |
+| `web_search.py` | Web search integration with pluggable providers (DuckDuckGo, Brave, Google Custom Search), caching, and time-sensitive query detection |
 | `zim_downloader.py` | Kiwix OPDS catalog interface, download engine, custom ZIM source-folder support, install status, and manifest handling |
 
 ## Internal Architecture
@@ -44,8 +45,9 @@ python -m src.manage_zim status
 - **Embedding**: `embedder.py` wraps `sentence-transformers` with `all-MiniLM-L6-v2`.
 - **Vector search**: `vectordb.py` stores FAISS indexes and chunk text stores.
 - **Keyword search**: `bm25_index.py` builds a `rank-bm25` index from the same chunks.
-- **Hybrid retrieval**: `hybrid_search.py` merges FAISS and BM25 rankings with Reciprocal Rank Fusion.
-- **Query routing**: `query_analyzer.py` decides whether retrieval is needed and chooses `hybrid`, `faiss`, or `bm25`.
+- **Hybrid retrieval**: `hybrid_search.py` merges FAISS and BM25 rankings (plus optional web results) with Reciprocal Rank Fusion.
+- **Query routing**: `query_analyzer.py` decides whether retrieval is needed, detects time-sensitive queries, and chooses `hybrid`, `faiss`, or `bm25`.
+- **Web search**: `web_search.py` provides pluggable search providers (DuckDuckGo, Brave, Google Custom Search) for time-sensitive queries; results are cached and merged into local results via RRF.
 - **Optional reranking**: `reranker.py` can run a cross-encoder pass over retrieved chunks.
-- **LLM forwarding**: `main.py` proxies OpenAI-compatible `/v1/*` traffic to the configured upstream endpoint.
+- **LLM forwarding**: `main.py` proxies OpenAI-compatible `/v1/*` traffic to any configured upstream endpoint (local runtime, cloud API, or gateway). API keys enable authentication with services that require them.
 - **State**: `config.py`, `collections.py`, and `zim_downloader.py` manage JSON and manifest-backed state. Collection metadata is stored in `collections.json`; collection folders contain lightweight links to ZIM files in the active source folder.

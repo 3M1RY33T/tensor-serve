@@ -17,6 +17,11 @@ DEFAULT_CONFIG = {
     "relevance_threshold": 0.05,
     "query_analysis_enabled": True,
     "reranker_enabled": False,
+    "web_search_enabled": False,
+    "web_search_provider": "duckduckgo",
+    "web_search_api_key": None,
+    "web_search_engine_id": None,
+    "web_search_results": 3,
 }
 
 
