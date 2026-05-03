@@ -1,8 +1,10 @@
-# Tensor Serve
+# Tensor (Serve)
 
-Tensor Serve is an **offline-first, retrieval-augmented proxy** for any OpenAI-compatible AI backend. It downloads documentation and knowledge bases as ZIM files, builds a local semantic vector database from them, and uses that database to give an AI model relevant context when answering questions — while keeping your data private.
+`tensor-serve` is a ZIM-based retrieval augmented proxy for any OpenAI-compatible AI. This program (optionally) lets you download ZIM documentation from the **live Kiwix OPDS catalog**, builds a local semantic vector database from them, and uses that database to provide an AI model relevany context when answering questions.
 
-**Not tied to local models**: Tensor Serve works with any OpenAI-compatible endpoint — local runtimes (Ollama, LM Studio), cloud APIs (OpenAI, Anthropic), or LLM gateways (LiteLLM, vLLM). API keys enable authentication with services that require them.
+The purpose of this program is to provide the service for customizing your AI for your specific needs seamlessly.
+
+Tensor works with any OpenAI-compatible endpoint — local runtimes (Ollama, LM Studio), cloud APIs (OpenAI, Anthropic), or LLM gateways (LiteLLM, vLLM). API keys enable authentication with services that require them.
 
 ---
 
@@ -14,7 +16,7 @@ Tensor Serve is an **offline-first, retrieval-augmented proxy** for any OpenAI-c
 4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`); time-sensitive queries optionally trigger web search
 5. **OpenAI-compatible proxy** — For `/v1/chat/completions`, the user message is embedded (or served from cache) → hybrid search retrieves top-k chunks (optionally merged with web results) → optional cross-encoder reranking improves result order → retrieved context is injected into the request before it is forwarded to the upstream AI server.
 
-### Hybrid search (FAISS + BM25 + optional Web Search via Reciprocal Rank Fusion)
+### Hybrid search (FAISS + BM25 + optional Web Search w/ Reciprocal Rank Fusion)
 
 Search requests and OpenAI-compatible chat requests can run **up to three retrievals in parallel** and merge them:
 
@@ -25,11 +27,6 @@ Search requests and OpenAI-compatible chat requests can run **up to three retrie
 | Requires setup | Automatic | Automatic | Optional; disabled by default |
 
 Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in multiple result sets float to the top. The pipeline degrades gracefully — if one index is unavailable it is skipped.
-
-**Offline-first by default**: Local ZIM indexes are prioritized. Web search is:
-- **Disabled by default** — queries use only your offline knowledge base
-- **Time-sensitive queries only** — enabled only for queries mentioning recent info keywords like "latest", "today", "breaking", "current", etc.
-- **User-controlled** — opt-in via configuration endpoints
 
 The query analyzer automatically selects the search strategy:
 
@@ -85,7 +82,20 @@ curl -X POST http://localhost:8000/zim/register \
 
 ---
 
-## 3. REST API (`main.py`)
+## 3. Curated Categories
+
+Four curated categories are available for convenience. They help queue downloads, but they do not define what gets ingested. Ingestion reads actual `.zim` files from source-folder paths and collection folders.
+
+| Category | Contents | Approx. size |
+|---|---|---|
+| Research | Wikipedia, Wikisource, Wikinews | ~65 GB |
+| Learning | Wikiversity, Wikibooks | ~5 GB |
+| Literature | Project Gutenberg, Wikibooks | ~63 GB |
+| Coding | Stack Overflow, All DevDocs (231 entries) | ~80 GB + ~588 MB |
+
+---
+
+## 4. REST API (`main.py`)
 
 Start the server with: `uvicorn main:app --host 0.0.0.0 --port 8000`
 
@@ -205,31 +215,6 @@ forwarding the request upstream.
 
 ---
 
-## 4. Curated Categories
-
-Four curated categories are available for convenience. They help queue downloads, but they do not define what gets ingested. Ingestion reads actual `.zim` files from source-folder paths and collection folders.
-
-| Category | Contents | Approx. size |
-|---|---|---|
-| Research | Wikipedia, Wikisource, Wikinews | ~65 GB |
-| Learning | Wikiversity, Wikibooks | ~5 GB |
-| Literature | Project Gutenberg, Wikibooks | ~63 GB |
-| Coding | Stack Overflow, All DevDocs (231 entries) | ~80 GB + ~588 MB |
-
----
-
-## 5. Runtime Files
-
-Generated runtime files live at the repository root:
-
-| File or directory | Purpose |
-|---|---|
-| `config.json` | Current AI endpoint, model, and retrieval settings |
-| `collections.json` | Saved collection metadata and active collection |
-| `zim_manifest.json` | Record of installed ZIM files |
-| `zim_files/` | Default downloaded ZIM folder, created only when no custom `zim_source_folder` is configured |
-| `*.index`, `*.pkl`, `*.bm25` | Generated FAISS, text-store, and BM25 database artifacts |
-
 ## 6. Source Code
 
 Application source lives in `src/`. See [`src/README.md`](src/README.md) for the module map and code-level architecture notes.
@@ -327,6 +312,61 @@ curl http://localhost:8000/config/web-search/status
 ```bash
 curl -X POST http://localhost:8000/config/web-search/disable
 ```
+
+### Search Mode Customization
+
+Control which search methods are available for different queries:
+
+**Keyword Search Modes** — how to handle term-based and API name lookups:
+- `auto` (default): Automatically select based on query characteristics
+- `web`: Use web search only for keyword matching (requires web search enabled)
+- `zim`: Use local ZIM indexes only (BM25)
+- `off`: Disable keyword search entirely
+
+**Semantic Search Modes** — how to handle conceptual and explanation queries:
+- `auto` (default): Automatically decide based on query characteristics
+- `on`: Always use semantic search (FAISS) when available
+- `off`: Disable semantic search entirely
+
+**View current search modes**:
+```bash
+curl http://localhost:8000/config/search-modes
+```
+
+**Update search modes**:
+```bash
+curl -X PATCH http://localhost:8000/config/search-modes \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyword_search_mode": "zim",     # Optional: auto|web|zim|off
+    "semantic_search_mode": "auto"    # Optional: auto|on|off
+  }'
+```
+
+**Examples**:
+- **Only semantic search** (for conceptual questions):
+  ```bash
+  curl -X PATCH http://localhost:8000/config/search-modes \
+    -d '{"keyword_search_mode": "off", "semantic_search_mode": "on"}'
+  ```
+
+- **Only keyword search** (for code lookups and APIs):
+  ```bash
+  curl -X PATCH http://localhost:8000/config/search-modes \
+    -d '{"keyword_search_mode": "zim", "semantic_search_mode": "off"}'
+  ```
+
+- **Web-first for keyword searches** (useful if offline knowledge base is incomplete):
+  ```bash
+  curl -X PATCH http://localhost:8000/config/search-modes \
+    -d '{"keyword_search_mode": "web"}'
+  ```
+
+- **Disable all search** (use only model knowledge):
+  ```bash
+  curl -X PATCH http://localhost:8000/config/search-modes \
+    -d '{"keyword_search_mode": "off", "semantic_search_mode": "off"}'
+  ```
 
 #### Model auto-detection
 

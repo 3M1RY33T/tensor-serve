@@ -33,7 +33,7 @@ python -m src.manage_zim status
 | `ingest.py` | Single-ZIM ingestion pipeline |
 | `multi_ingest.py` | Multi-ZIM ingestion pipeline for combined databases from files or directories |
 | `collections.py` | Collection folder discovery, metadata, and active-collection persistence |
-| `query_analyzer.py` | RAG/no-RAG decisions and search-mode selection |
+| `query_analyzer.py` | RAG/no-RAG decisions, time-sensitive query detection, and search-mode selection with customization (keyword: auto|web|zim|off, semantic: auto|on|off) |
 | `reranker.py` | Optional cross-encoder reranker for second-stage result ordering |
 | `utils.py` | ZIM article iteration and HTML/text cleanup helpers |
 | `vectordb.py` | FAISS index wrapper, including save/load/search helpers |

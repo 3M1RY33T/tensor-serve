@@ -449,6 +449,62 @@ def get_web_search_status():
     }
 
 
+@app.get("/config/search-modes")
+def get_search_modes_config():
+    """Get current search mode customization settings."""
+    config = load_config()
+    
+    return {
+        "keyword_search_mode": config.get("keyword_search_mode", "auto"),
+        "semantic_search_mode": config.get("semantic_search_mode", "auto"),
+        "keyword_modes": {
+            "auto": "Automatically select keyword search based on query characteristics",
+            "web": "Use web search only for keyword matching (requires web_search_enabled)",
+            "zim": "Use ZIM indexes (BM25) only for keyword matching",
+            "off": "Disable keyword search entirely"
+        },
+        "semantic_modes": {
+            "auto": "Automatically decide whether to use semantic search based on query",
+            "on": "Always use semantic search (FAISS) when available",
+            "off": "Disable semantic search entirely"
+        }
+    }
+
+
+@app.patch("/config/search-modes")
+def update_search_modes(req: dict):
+    """
+    Configure keyword and semantic search modes.
+    
+    Request body (all fields optional):
+    {
+        "keyword_search_mode": "auto|web|zim|off",
+        "semantic_search_mode": "auto|on|off"
+    }
+    """
+    keyword_mode = req.get("keyword_search_mode")
+    semantic_mode = req.get("semantic_search_mode")
+    
+    if keyword_mode and keyword_mode not in ("auto", "web", "zim", "off"):
+        raise HTTPException(status_code=400, detail=f"Invalid keyword_search_mode: {keyword_mode}")
+    
+    if semantic_mode and semantic_mode not in ("auto", "on", "off"):
+        raise HTTPException(status_code=400, detail=f"Invalid semantic_search_mode: {semantic_mode}")
+    
+    if keyword_mode:
+        set_config_value("keyword_search_mode", keyword_mode)
+    if semantic_mode:
+        set_config_value("semantic_search_mode", semantic_mode)
+    
+    config = load_config()
+    return {
+        "status": "updated",
+        "keyword_search_mode": config.get("keyword_search_mode", "auto"),
+        "semantic_search_mode": config.get("semantic_search_mode", "auto")
+    }
+
+
+
 @app.patch("/config")
 def update_config(req: UpdateConfigRequest):
     """
@@ -1018,7 +1074,11 @@ def search(req: SearchRequest):
         if reranker_enabled is None:
             reranker_enabled = False
         
-        search_mode = QueryAnalyzer.select_search_mode(req.query)
+        # Get search mode customization settings
+        keyword_search_mode = get_config_value("keyword_search_mode") or "auto"
+        semantic_search_mode = get_config_value("semantic_search_mode") or "auto"
+        
+        search_mode = QueryAnalyzer.select_search_mode(req.query, keyword_search_mode, semantic_search_mode)
         
         # Check cache first
         cached_results = query_cache.get_search_result(req.query, search_mode, req.top_k)
@@ -1235,7 +1295,11 @@ def _context_for_query(query: str) -> list:
     if reranker_enabled is None:
         reranker_enabled = False
 
-    search_mode = QueryAnalyzer.select_search_mode(query)
+    # Get search mode customization settings
+    keyword_search_mode = get_config_value("keyword_search_mode") or "auto"
+    semantic_search_mode = get_config_value("semantic_search_mode") or "auto"
+
+    search_mode = QueryAnalyzer.select_search_mode(query, keyword_search_mode, semantic_search_mode)
     cached_chunks = query_cache.get_search_result(query, search_mode, context_size)
     if cached_chunks is not None:
         return cached_chunks

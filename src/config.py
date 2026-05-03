@@ -22,6 +22,8 @@ DEFAULT_CONFIG = {
     "web_search_api_key": None,
     "web_search_engine_id": None,
     "web_search_results": 3,
+    "keyword_search_mode": "auto",     # auto | web | zim | off
+    "semantic_search_mode": "auto",    # auto | on | off
 }
 
 
