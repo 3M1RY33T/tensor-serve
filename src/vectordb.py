@@ -9,16 +9,20 @@ class VectorDB:
     def __init__(self, dim):
         self.index = faiss.IndexFlatL2(dim)
         self.texts = []
+        self.metadata = []
         self.dim = dim
 
-    def add(self, embeddings, chunks):
+    def add(self, embeddings, chunks, metadata=None):
         self.index.add(np.array(embeddings).astype("float32"))
         self.texts.extend(chunks)
+        if metadata is None:
+            metadata = [{} for _ in chunks]
+        self.metadata.extend(metadata)
 
     def save(self, path="db"):
         faiss.write_index(self.index, f"{path}.index")
         with open(f"{path}.pkl", "wb") as f:
-            pickle.dump(self.texts, f)
+            pickle.dump({"texts": self.texts, "metadata": self.metadata}, f)
 
     def load(self, path="db"):
         index_path = f"{path}.index"
@@ -31,7 +35,13 @@ class VectorDB:
 
         self.index = faiss.read_index(index_path)
         with open(pkl_path, "rb") as f:
-            self.texts = pickle.load(f)
+            data = pickle.load(f)
+        if isinstance(data, dict):
+            self.texts = data.get("texts", [])
+            self.metadata = data.get("metadata", [{} for _ in self.texts])
+        else:
+            self.texts = data
+            self.metadata = [{} for _ in self.texts]
 
     def search(self, query_embedding, top_k=5):
         distances, indices = self.index.search(

@@ -90,6 +90,7 @@ Interactive docs available at `http://localhost:8000/docs`
 | `GET` | `/health` | Server status, whether DB is loaded, active collection |
 | `GET` | `/config` | View current AI endpoint, model, and settings |
 | `GET` | `/config/models` | List models available at the configured endpoint (or `?endpoint=<url>` to probe any URL) |
+| `GET` | `/config/local-ai/detect` | Probe common local AI runtimes such as Ollama and LM Studio |
 | `POST` | `/config/set-ai-endpoint` | Set `ai_endpoint` and optionally `ai_model` (auto-detected if omitted) |
 | `PATCH` | `/config` | Update any combination of the core settings (all fields optional) |
 
@@ -175,9 +176,14 @@ The `devdocs_all` bundle entry additionally includes `completed_files` and `tota
 4. Uses cached embeddings/results when available, otherwise retrieves relevant context chunks
 5. Optionally reranks retrieved chunks, then prepends a context system message
 6. Forwards the modified request to the configured upstream endpoint's `/v1/chat/completions`
-7. Returns the upstream response body, status code, and content type directly to the client
+7. Appends a short resource footer when local context was used, such as `Read from Stack Overflow` and `Enhanced by coding_db`
+8. Returns the upstream status code and content type to the client
 
 All other `/v1/*` routes are forwarded unchanged. If no vector database is loaded, or if query analysis decides retrieval is unnecessary, chat requests are forwarded without context injection. This keeps Tensor Serve focused on offline context while the local AI server remains responsible for its own API surface.
+
+To suppress the resource footer for a request, add `"tensor_show_resources": false`
+to the `/v1/chat/completions` JSON body. Tensor removes that field before
+forwarding the request upstream.
 
 **Point any OpenAI-compatible tool at `http://localhost:8000/v1`** (or `http://localhost:8000` for tools that auto-discover models):
 
@@ -230,8 +236,13 @@ Core settings are readable via `GET /config` and writable via `PATCH /config`.
 
 | Setting | Default | What it controls |
 |---|---|---|
-| `ai_endpoint` | `null` | URL of the upstream local AI server required for `/v1/*` proxying |
-| `ai_model` | `null` | Saved model selection from endpoint auto-detection; `/v1/*` proxy requests keep the client's requested model |
+| `ai_provider` | `openai-compatible` | Label for the upstream provider or gateway |
+| `ai_endpoint` | `null` | URL of the upstream local AI server, cloud API, or LLM gateway required for `/v1/*` proxying |
+| `ai_model` | `null` | Saved model selected for Tensor-enhanced chat; `/v1/chat/completions` requests are forwarded using this model when configured |
+| `ai_api_key` | `null` | Optional provider API key; `GET /config` only reports whether one is configured |
+| `ai_api_key_header` | `Authorization` | Header used for the API key |
+| `ai_api_key_prefix` | `Bearer` | Optional prefix prepended to the API key; use an empty string for raw-key headers |
+| `ai_extra_headers` | `{}` | Optional additional upstream headers for gateways or provider-specific requirements |
 | `context_size` | `3` | Number of vector DB chunks retrieved as context per OpenAI-compatible chat request |
 | `zim_source_folder` | `null` | Optional folder to scan for existing `.zim` files and use for future downloads |
 
@@ -245,7 +256,12 @@ Advanced retrieval settings are read from `config.json`:
 
 #### Model auto-detection
 
-`ai_model` does not need to be set manually. The server can discover available models by querying the endpoint directly — it tries the OpenAI-compatible `GET /v1/models` route first (vLLM, LM Studio, LocalAI, etc.), then falls back to Ollama's `GET /api/tags`.
+`ai_model` does not need to be set manually. The server can discover available models by querying the endpoint directly — it tries the OpenAI-compatible `GET /v1/models` route first (LM Studio, Ollama's OpenAI-compatible API, vLLM, LocalAI, LiteLLM, OpenAI-compatible cloud APIs, etc.), then falls back to Ollama's `GET /api/tags`.
+
+**Example — detect local runtimes:**
+```bash
+curl http://localhost:8000/config/local-ai/detect
+```
 
 **Example — list models before configuring:**
 ```bash
@@ -261,6 +277,40 @@ curl -X POST http://localhost:8000/config/set-ai-endpoint \
   -d '{"ai_endpoint": "http://localhost:11434"}'
 ```
 
+**Example — configure LM Studio:**
+```bash
+curl -X POST http://localhost:8000/config/set-ai-endpoint \
+  -H "Content-Type: application/json" \
+  -d '{"ai_provider": "lm-studio", "ai_endpoint": "http://localhost:1234"}'
+```
+
+**Example — configure an OpenAI-compatible cloud API with a key:**
+```bash
+curl -X POST http://localhost:8000/config/set-ai-endpoint \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ai_provider": "openai",
+    "ai_endpoint": "https://api.openai.com/v1",
+    "ai_model": "gpt-4.1-mini",
+    "ai_api_key": "sk-..."
+  }'
+```
+
+**Example — configure a LiteLLM gateway:**
+```bash
+curl -X POST http://localhost:8000/config/set-ai-endpoint \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ai_provider": "litellm",
+    "ai_endpoint": "http://localhost:4000/v1",
+    "ai_model": "anthropic/claude-sonnet-4-5"
+  }'
+```
+
+Provider secrets are stored in `config.json` by default. For a packaged app,
+store API keys in the OS keychain and pass them to Tensor at runtime instead of
+writing long-lived secrets to disk.
+
 **Example — change only context size:**
 ```bash
 curl -X PATCH http://localhost:8000/config \
@@ -275,6 +325,7 @@ curl -X PATCH http://localhost:8000/config \
   -d '{
     "ai_endpoint": "http://localhost:11434",
     "ai_model": "llama3",
+    "ai_api_key": null,
     "context_size": 5,
     "zim_source_folder": "/data/zim"
   }'
@@ -392,6 +443,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mistral",
+    "tensor_show_resources": false,
     "messages": [
       {"role": "user", "content": "Who invented the telephone?"}
     ]

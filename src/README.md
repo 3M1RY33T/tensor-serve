@@ -23,7 +23,7 @@ python -m src.manage_zim status
 
 | File | Purpose |
 |---|---|
-| `ai_client.py` | HTTP client for the configured local or OpenAI-compatible upstream LLM endpoint |
+| `ai_client.py` | HTTP client for the configured local, OpenAI-compatible, or gateway-backed upstream LLM endpoint |
 | `bm25_index.py` | BM25 keyword index wrapper, including save/load/search helpers |
 | `cache.py` | In-memory LRU cache for query embeddings and search results |
 | `chunker.py` | 500-word overlapping text chunking |

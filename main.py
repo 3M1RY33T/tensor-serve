@@ -1,4 +1,5 @@
 import glob
+import json
 import os
 import shutil
 from contextlib import asynccontextmanager
@@ -51,6 +52,7 @@ class AppState:
         self.db = None
         self.bm25 = None
         self.db_loaded = False
+        self.db_name = None
         self.ai_client = AIClient()
         self.active_collection = None
 
@@ -73,6 +75,7 @@ async def lifespan(app: FastAPI):
                 app_state.db = VectorDB(dim=384)
                 app_state.db.load(db_name)
                 app_state.db_loaded = True
+                app_state.db_name = db_name
                 print(f"[startup] Auto-loaded FAISS database: {db_name}")
             except Exception as e:
                 print(f"[startup] Warning: could not auto-load '{db_name}': {e}")
@@ -93,6 +96,8 @@ async def lifespan(app: FastAPI):
     app_state.embedder = None
     app_state.db = None
     app_state.bm25 = None
+    app_state.db_loaded = False
+    app_state.db_name = None
 
 
 app = FastAPI(
@@ -137,11 +142,21 @@ class SearchRequest(BaseModel):
 class ConfigRequest(BaseModel):
     ai_endpoint: str
     ai_model: Optional[str] = None
+    ai_provider: Optional[str] = None
+    ai_api_key: Optional[str] = None
+    ai_api_key_header: Optional[str] = None
+    ai_api_key_prefix: Optional[str] = None
+    ai_extra_headers: Optional[dict] = None
 
 
 class UpdateConfigRequest(BaseModel):
+    ai_provider: Optional[str] = None
     ai_endpoint: Optional[str] = None
     ai_model: Optional[str] = None
+    ai_api_key: Optional[str] = None
+    ai_api_key_header: Optional[str] = None
+    ai_api_key_prefix: Optional[str] = None
+    ai_extra_headers: Optional[dict] = None
     context_size: Optional[int] = None
     zim_source_folder: Optional[str] = None
 
@@ -203,8 +218,15 @@ def clear_cache():
 def get_config():
     config = load_config()
     return {
+        "ai_provider": config.get("ai_provider", "openai-compatible"),
         "ai_endpoint": config.get("ai_endpoint"),
         "ai_model": config.get("ai_model"),
+        "ai_api_key_configured": bool(config.get("ai_api_key")),
+        "ai_api_key_header": config.get("ai_api_key_header", "Authorization"),
+        "ai_api_key_prefix": config.get("ai_api_key_prefix", "Bearer"),
+        "ai_extra_headers": {
+            key: "<configured>" for key in (config.get("ai_extra_headers") or {})
+        },
         "context_size": config.get("context_size", 3),
         "zim_source_folder": config.get("zim_source_folder"),
     }
@@ -216,11 +238,23 @@ def set_ai_endpoint(req: ConfigRequest):
         ai_model = req.ai_model
         auto_detected = False
         all_models = []
+        provider = req.ai_provider or "openai-compatible"
+        api_key_header = req.ai_api_key_header or "Authorization"
+        api_key_prefix = (
+            "Bearer" if req.ai_api_key_prefix is None else req.ai_api_key_prefix
+        )
+        extra_headers = req.ai_extra_headers or {}
 
         if not ai_model:
             from src.ai_client import AIClient as _AIClient
 
-            all_models = _AIClient.list_models(req.ai_endpoint)
+            all_models = _AIClient.list_models(
+                req.ai_endpoint,
+                req.ai_api_key,
+                api_key_header,
+                api_key_prefix,
+                extra_headers,
+            )
             if not all_models:
                 raise HTTPException(
                     status_code=502,
@@ -229,14 +263,29 @@ def set_ai_endpoint(req: ConfigRequest):
             ai_model = all_models[0]["id"]
             auto_detected = True
 
+        set_config_value("ai_provider", provider)
         set_config_value("ai_endpoint", req.ai_endpoint)
         set_config_value("ai_model", ai_model)
-        app_state.ai_client.update_config(req.ai_endpoint, ai_model)
+        set_config_value("ai_api_key", req.ai_api_key)
+        set_config_value("ai_api_key_header", api_key_header)
+        set_config_value("ai_api_key_prefix", api_key_prefix)
+        set_config_value("ai_extra_headers", extra_headers)
+        app_state.ai_client.update_config(
+            req.ai_endpoint,
+            ai_model,
+            provider,
+            req.ai_api_key,
+            api_key_header,
+            api_key_prefix,
+            extra_headers,
+        )
 
         response = {
             "status": "configured",
+            "ai_provider": provider,
             "ai_endpoint": req.ai_endpoint,
             "ai_model": ai_model,
+            "ai_api_key_configured": bool(req.ai_api_key),
             "auto_detected": auto_detected,
         }
         if auto_detected and len(all_models) > 1:
@@ -266,6 +315,7 @@ def list_available_models(endpoint: Optional[str] = None):
     """
     from src.ai_client import AIClient as _AIClient
 
+    config = load_config()
     target = endpoint or app_state.ai_client.endpoint
     if not target:
         raise HTTPException(
@@ -274,7 +324,14 @@ def list_available_models(endpoint: Optional[str] = None):
         )
 
     try:
-        models = _AIClient.list_models(target)
+        use_configured_auth = not endpoint or target == config.get("ai_endpoint")
+        models = _AIClient.list_models(
+            target,
+            config.get("ai_api_key") if use_configured_auth else None,
+            config.get("ai_api_key_header", "Authorization"),
+            config.get("ai_api_key_prefix", "Bearer"),
+            config.get("ai_extra_headers", {}) if use_configured_auth else {},
+        )
         return {
             "endpoint": target,
             "models": [m["id"] for m in models],
@@ -283,6 +340,14 @@ def list_available_models(endpoint: Optional[str] = None):
         }
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.get("/config/local-ai/detect")
+def detect_local_ai_endpoints():
+    """Detect common local OpenAI-compatible AI runtimes."""
+    from src.ai_client import AIClient as _AIClient
+
+    return {"endpoints": _AIClient.detect_local_endpoints()}
 
 
 @app.patch("/config")
@@ -311,11 +376,16 @@ def update_config(req: UpdateConfigRequest):
             set_config_value(key, value)
 
     # Keep the live AI client in sync if connection settings changed
-    if "ai_endpoint" in updates or "ai_model" in updates:
+    if any(key.startswith("ai_") for key in updates):
         config = load_config()
         app_state.ai_client.update_config(
             config.get("ai_endpoint"),
             config.get("ai_model"),
+            config.get("ai_provider", "openai-compatible"),
+            config.get("ai_api_key"),
+            config.get("ai_api_key_header", "Authorization"),
+            config.get("ai_api_key_prefix", "Bearer"),
+            config.get("ai_extra_headers", {}),
         )
 
     config = load_config()
@@ -323,8 +393,15 @@ def update_config(req: UpdateConfigRequest):
         "status": "updated",
         "updated_fields": list(updates.keys()),
         "config": {
+            "ai_provider": config.get("ai_provider", "openai-compatible"),
             "ai_endpoint": config.get("ai_endpoint"),
             "ai_model": config.get("ai_model"),
+            "ai_api_key_configured": bool(config.get("ai_api_key")),
+            "ai_api_key_header": config.get("ai_api_key_header", "Authorization"),
+            "ai_api_key_prefix": config.get("ai_api_key_prefix", "Bearer"),
+            "ai_extra_headers": {
+                key: "<configured>" for key in (config.get("ai_extra_headers") or {})
+            },
             "context_size": config.get("context_size", 3),
             "zim_source_folder": config.get("zim_source_folder"),
         },
@@ -799,6 +876,7 @@ def load_db(name: str = "zim_db"):
         app_state.db = VectorDB(dim=384)
         app_state.db.load(name)
         app_state.db_loaded = True
+        app_state.db_name = name
 
         # Load BM25 index if available (enables hybrid search)
         bm25_path = f"{name}.bm25"
@@ -930,7 +1008,9 @@ def _forward_response_headers(response: requests.Response) -> dict:
 
 
 def _upstream_url(path: str, request: Request) -> str:
-    upstream = f"{_require_ai_endpoint()}/{path.lstrip('/')}"
+    from src.ai_client import AIClient as _AIClient
+
+    upstream = _AIClient.endpoint_url(_require_ai_endpoint(), path)
     if request.url.query:
         upstream = f"{upstream}?{request.url.query}"
     return upstream
@@ -941,6 +1021,7 @@ async def _proxy_ai_request(
     path: str,
     json_payload: Optional[dict] = None,
     stream: bool = False,
+    response_suffix: Optional[str] = None,
 ):
     """
     Forward an HTTP request to the configured upstream AI server.
@@ -950,6 +1031,7 @@ async def _proxy_ai_request(
     """
     url = _upstream_url(path, request)
     headers = _forward_request_headers(request)
+    headers.update(app_state.ai_client.auth_headers())
 
     try:
         if stream:
@@ -967,6 +1049,8 @@ async def _proxy_ai_request(
                 try:
                     for chunk in upstream.iter_content(chunk_size=None):
                         if chunk:
+                            if response_suffix and chunk.strip() == b"data: [DONE]":
+                                yield _streaming_chat_suffix_chunk(response_suffix)
                             yield chunk
                 finally:
                     upstream.close()
@@ -986,8 +1070,13 @@ async def _proxy_ai_request(
             data=None if json_payload is not None else await request.body(),
             timeout=60,
         )
+        content = upstream.content
+        content_type = upstream.headers.get("content-type", "")
+        if response_suffix and "application/json" in content_type:
+            content = _chat_response_with_suffix(content, response_suffix)
+
         return Response(
-            content=upstream.content,
+            content=content,
             status_code=upstream.status_code,
             headers=_forward_response_headers(upstream),
             media_type=upstream.headers.get("content-type"),
@@ -1090,6 +1179,96 @@ def _payload_with_context(payload: dict, context_chunks: list) -> dict:
     return updated
 
 
+def _pop_show_resources(payload: dict) -> bool:
+    value = payload.pop("tensor_show_resources", True)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
+def _metadata_for_chunks(context_chunks: list) -> list:
+    """Return chunk metadata for retrieved chunks when the loaded DB has it."""
+    db = app_state.db
+    if db is None or not getattr(db, "metadata", None):
+        return []
+
+    index_by_text = {}
+    for idx, text in enumerate(getattr(db, "texts", [])):
+        index_by_text.setdefault(text, idx)
+
+    metadata = []
+    for chunk in context_chunks:
+        idx = index_by_text.get(chunk)
+        if idx is None or idx >= len(db.metadata):
+            continue
+        metadata.append(db.metadata[idx] or {})
+    return metadata
+
+
+def _readable_source_title(metadata: dict) -> Optional[str]:
+    title = metadata.get("zim_title")
+    if title:
+        return str(title)
+
+    zim_path = metadata.get("zim_path")
+    if zim_path:
+        return os.path.splitext(os.path.basename(str(zim_path)))[0]
+    return None
+
+
+def _resource_attribution(context_chunks: list) -> str:
+    """Build the response footer that names retrieved ZIM sources and local DB."""
+    if not context_chunks:
+        return ""
+
+    lines = []
+    source_titles = []
+    seen_sources = set()
+    for metadata in _metadata_for_chunks(context_chunks):
+        title = _readable_source_title(metadata)
+        if title and title not in seen_sources:
+            seen_sources.add(title)
+            source_titles.append(title)
+
+    if source_titles:
+        lines.append(f"Read from {', '.join(source_titles)}")
+    if app_state.db_name:
+        lines.append(f"Enhanced by {app_state.db_name}")
+
+    return "\n".join(lines)
+
+
+def _chat_response_with_suffix(content: bytes, suffix: str) -> bytes:
+    """Append attribution text to non-streaming OpenAI chat responses."""
+    try:
+        data = json.loads(content)
+    except (TypeError, ValueError):
+        return content
+
+    choices = data.get("choices")
+    if not isinstance(choices, list):
+        return content
+
+    for choice in choices:
+        message = choice.get("message") if isinstance(choice, dict) else None
+        if not isinstance(message, dict):
+            continue
+        text = message.get("content")
+        if isinstance(text, str):
+            message["content"] = f"{text}\n\n{suffix}"
+
+    return json.dumps(data).encode("utf-8")
+
+
+def _streaming_chat_suffix_chunk(suffix: str) -> bytes:
+    """Return an OpenAI-compatible streaming delta for attribution text."""
+    data = {
+        "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": {"content": f"\n\n{suffix}"}}],
+    }
+    return f"data: {json.dumps(data)}\n\n".encode("utf-8")
+
+
 @app.get("/v1/models")
 async def list_v1_models(request: Request):
     """
@@ -1122,13 +1301,20 @@ async def chat_completions(request: Request):
 
     user_message = _last_user_text(messages)
     context_chunks = _context_for_query(user_message) if user_message else []
+    show_resources = _pop_show_resources(payload)
+    if app_state.ai_client.model:
+        payload["model"] = app_state.ai_client.model
     payload = _payload_with_context(payload, context_chunks)
+    response_suffix = (
+        _resource_attribution(context_chunks) if show_resources else ""
+    )
 
     return await _proxy_ai_request(
         request,
         "v1/chat/completions",
         json_payload=payload,
         stream=bool(payload.get("stream")),
+        response_suffix=response_suffix or None,
     )
 
 
@@ -1181,6 +1367,7 @@ def clean_working_files():
     # Reset in-memory vector DB state so stale handles are not used
     app_state.db = None
     app_state.db_loaded = False
+    app_state.db_name = None
     app_state.bm25 = None
 
     return {

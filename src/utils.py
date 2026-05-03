@@ -12,6 +12,15 @@ def iterate_articles(zim_path):
     images, JSON and internal metadata entries are skipped.
     """
     archive = Archive(zim_path)
+    try:
+        zim_title = archive.get_metadata("Title")
+    except Exception:
+        try:
+            zim_title = archive.get_metadata("Name")
+        except Exception:
+            zim_title = None
+    if isinstance(zim_title, bytes):
+        zim_title = zim_title.decode("utf-8", errors="ignore")
 
     for i in range(archive.all_entry_count):
         try:
@@ -33,6 +42,8 @@ def iterate_articles(zim_path):
             yield {
                 "title": entry.title or entry.path,
                 "text": content,
+                "zim_title": zim_title,
+                "zim_path": zim_path,
             }
 
         except Exception:

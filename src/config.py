@@ -5,8 +5,13 @@ from pathlib import Path
 CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
+    "ai_provider": "openai-compatible",
     "ai_endpoint": None,
     "ai_model": None,
+    "ai_api_key": None,
+    "ai_api_key_header": "Authorization",
+    "ai_api_key_prefix": "Bearer",
+    "ai_extra_headers": {},
     "context_size": 3,
     "zim_source_folder": None,
     "relevance_threshold": 0.05,

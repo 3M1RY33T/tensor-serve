@@ -50,6 +50,32 @@ def test_v1_models_is_proxied_to_upstream(monkeypatch):
     assert captured["url"] == "http://upstream.local/v1/models"
 
 
+def test_v1_models_normalizes_endpoint_with_v1_and_forwards_configured_auth(monkeypatch):
+    captured = {}
+
+    def fake_request(method, url, **kwargs):
+        captured.update({"method": method, "url": url, **kwargs})
+        return FakeResponse(content=b'{"object":"list","data":[]}')
+
+    monkeypatch.setattr(main.requests, "request", fake_request)
+    main.app_state.ai_client.update_config(
+        "http://upstream.local/v1",
+        "selected-model",
+        "openai-compatible",
+        "secret",
+        "Authorization",
+        "Bearer",
+        {"X-Provider": "tensor"},
+    )
+
+    response = TestClient(app).get("/v1/models")
+
+    assert response.status_code == 200
+    assert captured["url"] == "http://upstream.local/v1/models"
+    assert captured["headers"]["Authorization"] == "Bearer secret"
+    assert captured["headers"]["X-Provider"] == "tensor"
+
+
 def test_chat_completions_injects_context_and_returns_raw_upstream_response(monkeypatch):
     captured = {}
 
@@ -82,10 +108,91 @@ def test_chat_completions_injects_context_and_returns_raw_upstream_response(monk
     assert captured["method"] == "POST"
     assert captured["url"] == "http://upstream.local/v1/chat/completions"
     assert captured["json"]["temperature"] == 0.2
+    assert captured["json"]["model"] == "local-model"
     assert captured["json"]["extra_body_field"] == {"kept": True}
     assert captured["json"]["messages"][0]["role"] == "system"
     assert "FastAPI routes map" in captured["json"]["messages"][0]["content"]
     assert captured["json"]["messages"][1] == payload["messages"][0]
+
+
+def test_chat_completions_appends_tensor_resource_attribution(monkeypatch):
+    captured = {}
+
+    class FakeDB:
+        texts = ["FastAPI routes map HTTP requests to Python callables."]
+        metadata = [
+            {
+                "zim_title": "FastAPI Docs",
+                "zim_path": "/zims/fastapi.zim",
+            }
+        ]
+
+    def fake_context(query):
+        assert query == "Explain FastAPI routing"
+        return ["FastAPI routes map HTTP requests to Python callables."]
+
+    def fake_request(method, url, **kwargs):
+        captured.update({"method": method, "url": url, **kwargs})
+        return FakeResponse(
+            content=(
+                b'{"choices":[{"message":{"role":"assistant",'
+                b'"content":"Routes connect URLs to handlers."}}]}'
+            )
+        )
+
+    monkeypatch.setattr(main, "_context_for_query", fake_context)
+    monkeypatch.setattr(main.requests, "request", fake_request)
+    main.app_state.ai_client.update_config("http://upstream.local", "local-model")
+    main.app_state.db = FakeDB()
+    main.app_state.db_name = "coding_db"
+
+    response = TestClient(app).post(
+        "/v1/chat/completions",
+        json={
+            "model": "local-model",
+            "messages": [{"role": "user", "content": "Explain FastAPI routing"}],
+        },
+    )
+
+    assert response.status_code == 200
+    content = response.json()["choices"][0]["message"]["content"]
+    assert "Routes connect URLs to handlers." in content
+    assert "Read from FastAPI Docs" in content
+    assert "Enhanced by coding_db" in content
+
+
+def test_chat_completions_can_suppress_tensor_resource_attribution(monkeypatch):
+    captured = {}
+
+    def fake_context(query):
+        return ["FastAPI routes map HTTP requests to Python callables."]
+
+    def fake_request(method, url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse(
+            content=(
+                b'{"choices":[{"message":{"role":"assistant",'
+                b'"content":"Routes connect URLs to handlers."}}]}'
+            )
+        )
+
+    monkeypatch.setattr(main, "_context_for_query", fake_context)
+    monkeypatch.setattr(main.requests, "request", fake_request)
+    main.app_state.ai_client.update_config("http://upstream.local", "local-model")
+    main.app_state.db_name = "coding_db"
+
+    response = TestClient(app).post(
+        "/v1/chat/completions",
+        json={
+            "model": "local-model",
+            "messages": [{"role": "user", "content": "Explain FastAPI routing"}],
+            "tensor_show_resources": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Enhanced by" not in response.json()["choices"][0]["message"]["content"]
+    assert "tensor_show_resources" not in captured["json"]
 
 
 def test_chat_completions_forwards_without_context_when_no_user_message(monkeypatch):

@@ -25,7 +25,7 @@ large ZIM ingestion. They cover the core pieces that can be checked quickly:
 | `test_config.py` | Persistent JSON config load/save helpers |
 | `test_vectordb.py` | FAISS index save/load/search behavior |
 | `test_ai_client.py` | Model discovery parsing |
-| `test_proxy_api.py` | `/v1/*` proxy forwarding, chat context injection, and upstream response passthrough |
+| `test_proxy_api.py` | `/v1/*` proxy forwarding, chat context injection, resource attribution, and upstream response passthrough |
 | `test_collections_and_zim.py` | Custom collection lifecycle, collection/ZIM API routes, custom ZIM source folders, and local ZIM manifest scanning |
 
 ## Manual API smoke test
@@ -45,7 +45,7 @@ Configure an AI endpoint:
 ```bash
 curl -X POST http://localhost:8000/config/set-ai-endpoint \
   -H "Content-Type: application/json" \
-  -d '{"ai_endpoint": "http://localhost:1234", "ai_model": "local-model"}'
+  -d '{"ai_provider": "lm-studio", "ai_endpoint": "http://localhost:1234", "ai_model": "local-model"}'
 ```
 
 Load an ingested database:
