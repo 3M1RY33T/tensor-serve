@@ -2,7 +2,7 @@ from typing import Dict, List, Optional
 
 import requests
 
-from src.config import get_config_value
+from api.config import get_config_value
 
 
 class AIClient:

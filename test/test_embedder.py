@@ -1,7 +1,7 @@
 import pytest
 
-import src.embedder as embedder_module
-from src.embedder import Embedder
+import api.embedder as embedder_module
+from api.embedder import Embedder
 
 
 def test_embedder_prefers_local_model_cache(monkeypatch):

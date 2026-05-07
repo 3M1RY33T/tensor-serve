@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.vectordb import VectorDB
+from api.vectordb import VectorDB
 
 
 def test_vectordb_save_load_and_search(tmp_path, monkeypatch):

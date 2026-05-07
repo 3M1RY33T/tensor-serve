@@ -1,1 +1,0 @@
-"""Tensor Serve source package."""

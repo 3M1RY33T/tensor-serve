@@ -3,14 +3,14 @@
 Tensor Serve ZIM File Manager CLI
 
 Usage:
-    python -m src.manage_zim list                    # List available category files
-    python -m src.manage_zim status                  # Show installation status
-    python -m src.manage_zim status <category>          # Status for a category
-    python -m src.manage_zim install <file_id>       # Install a file by ID
-    python -m src.manage_zim uninstall <file_id>     # Uninstall a file
-    python -m src.manage_zim install-category <category>   # Interactive install for a category
-    python -m src.manage_zim install-devdocs         # Install devdocs from full catalog
-    python -m src.manage_zim clean                   # Remove generated index files and caches
+    python -m tensor_serve zim list                    # List available category files
+    python -m tensor_serve zim status                  # Show installation status
+    python -m tensor_serve zim status <category>       # Status for a category
+    python -m tensor_serve zim install <file_id>       # Install a file by ID
+    python -m tensor_serve zim uninstall <file_id>     # Uninstall a file
+    python -m tensor_serve zim install-category <category>  # Interactive category install
+    python -m tensor_serve zim install-devdocs         # Install devdocs from full catalog
+    python -m tensor_serve zim clean                   # Remove generated index files and caches
 """
 
 import argparse
@@ -21,7 +21,7 @@ import sys
 
 import questionary
 
-from src.zim_downloader import (
+from api.zim_downloader import (
     bytes_to_human,
     download_file,
     get_category_installation_status,
@@ -83,7 +83,7 @@ def print_status(category_id=None):
 
         if not installed:
             print(
-                "\nNo files installed yet. Use 'python -m src.manage_zim list' to see available files."
+                "\nNo files installed yet. Use 'python -m tensor_serve zim list' to see available files."
             )
             return
 

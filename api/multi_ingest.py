@@ -2,11 +2,11 @@ from typing import List
 
 from tqdm import tqdm
 
-from src.bm25_index import BM25Index
-from src.chunker import chunk_text
-from src.embedder import Embedder
-from src.utils import clean_text, iterate_articles
-from src.vectordb import VectorDB
+from api.bm25_index import BM25Index
+from api.chunker import chunk_text
+from api.embedder import Embedder
+from api.utils import clean_text, iterate_articles
+from api.vectordb import VectorDB
 
 
 def run_multi_ingest(zim_paths: List[str], output_name="combined_db"):

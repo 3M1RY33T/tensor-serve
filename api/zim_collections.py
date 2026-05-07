@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from src.zim_downloader import (
+from api.zim_downloader import (
     bytes_to_human,
     get_zim_source_folder,
     init_zim_folder,

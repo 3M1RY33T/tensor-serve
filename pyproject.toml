@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tensor-serve"
+version = "0.1.0"
+description = "ZIM-based retrieval augmented proxy for OpenAI-compatible AI"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "fastapi>=0.104.1",
+    "uvicorn>=0.24.0",
+    "pydantic>=2.5.0",
+    "sentence-transformers>=3.0.0",
+    "libzim>=3.9.0",
+    "faiss-cpu>=1.7.4",
+    "tqdm>=4.66.1",
+    "numpy>=1.24.3",
+    "requests>=2.31.0",
+    "python-multipart>=0.0.7",
+    "questionary>=2.0.0",
+    "rank-bm25>=0.2.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/tensor-serve"
+Repository = "https://github.com/yourusername/tensor-serve"
+Issues = "https://github.com/yourusername/tensor-serve/issues"
+
+[project.scripts]
+tensor-serve = "tensor_serve:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "cli*", "tensor_serve*"]
+exclude = ["test*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.txt"]

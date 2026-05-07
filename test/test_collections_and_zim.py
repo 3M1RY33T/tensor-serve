@@ -1,8 +1,8 @@
-import src.collections as collections
-import src.zim_downloader as zim_downloader
+import api.zim_collections as collections
+import api.zim_downloader as zim_downloader
 from fastapi.testclient import TestClient
 
-import main
+import api.main as main
 
 
 def test_custom_collection_lifecycle(tmp_path, monkeypatch):

@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 import requests
 
-from src.config import get_config_value, set_config_value
+from api.config import get_config_value, set_config_value
 
 ZIM_FOLDER = "zim_files"
 MANIFEST_FILE = "zim_manifest.json"

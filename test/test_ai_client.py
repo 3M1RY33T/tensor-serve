@@ -1,6 +1,6 @@
 import requests
 
-from src.ai_client import AIClient
+from api.ai_client import AIClient
 
 
 class FakeResponse:

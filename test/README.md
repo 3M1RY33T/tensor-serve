@@ -37,7 +37,7 @@ a loaded vector database.
 Start the server:
 
 ```bash
-uvicorn main:app --reload
+python -m tensor_serve start --reload
 ```
 
 Configure an AI endpoint:

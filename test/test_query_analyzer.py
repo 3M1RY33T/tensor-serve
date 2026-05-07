@@ -1,4 +1,4 @@
-from src.query_analyzer import QueryAnalyzer
+from api.query_analyzer import QueryAnalyzer
 
 
 def test_needs_rag_skips_simple_queries():

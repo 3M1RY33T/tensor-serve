@@ -1,0 +1,12 @@
+fastapi>=0.104.1
+uvicorn>=0.24.0
+pydantic>=2.5.0
+sentence-transformers>=3.0.0
+libzim>=3.9.0
+faiss-cpu>=1.7.4
+tqdm>=4.66.1
+numpy>=1.24.3
+requests>=2.31.0
+python-multipart>=0.0.7
+questionary>=2.0.0
+rank-bm25>=0.2.2

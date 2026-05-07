@@ -4,9 +4,9 @@
 *.index
 *.pkl
 *.bm25
-conversations.db
 .venv/
 zim_manifest.json
 presets.json
 config.json
 .DS_Store
+collections.json

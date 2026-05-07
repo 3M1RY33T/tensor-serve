@@ -2,8 +2,8 @@ import json
 
 from fastapi.testclient import TestClient
 
-import main as main
-from main import app
+import api.main as main
+from api.main import app
 
 
 class FakeResponse:
