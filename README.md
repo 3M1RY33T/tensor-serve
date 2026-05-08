@@ -139,6 +139,32 @@ tensor-serve config set-ai-endpoint \
 
 API keys are encrypted before they are written to `config.json`. Tensor Serve uses a local `.tensor_config.key` file by default, or you can provide `TENSOR_CONFIG_KEY` / `TENSOR_CONFIG_KEY_FILE` for deployments that manage secrets externally.
 
+### Docker
+
+Build and run locally:
+
+```bash
+docker build -t tensor-serve:local .
+docker run --rm -p 8000:8000 -v tensor_serve_data:/data tensor-serve:local
+```
+
+Or use Compose:
+
+```bash
+docker compose up --build
+```
+
+The container stores runtime state in `/data`, including `config.json`, encrypted
+config key material, ZIM files, collections, and generated vector databases.
+When connecting to a host machine AI runtime from Docker Desktop, use the host
+gateway address:
+
+```bash
+docker compose exec tensor-serve tensor-serve config set-ai-endpoint \
+  --endpoint http://host.docker.internal:11434 \
+  --model mistral
+```
+
 ### Supported Environments
 
 **Local AI Runtimes** (no API key needed):
