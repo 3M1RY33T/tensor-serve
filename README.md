@@ -1,6 +1,4 @@
-<img align="left" width="30" height="30" src="assets/tensor.png">
-
-# Tensor (Serve)
+# <img align="left" width="30" height="30" src="assets/tensor.png"> Tensor (Serve)
 
 `tensor-serve` is a ZIM-based retrieval augmented proxy for any OpenAI-compatible AI. This program lets you download ZIM documentation from the **live Kiwix OPDS catalog**, builds a local semantic vector database from it, and uses that database to provide an AI model relevant context when answering questions.
 
