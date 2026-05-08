@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,18 +7,33 @@ name = "tensor-serve"
 version = "0.1.0"
 description = "ZIM-based retrieval augmented proxy for OpenAI-compatible AI"
 readme = "README.md"
-license = {file = "LICENSE"}
-requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    {name = "3M1RY33T"},
+]
+keywords = [
+    "ai",
+    "bm25",
+    "faiss",
+    "kiwix",
+    "openai-compatible",
+    "rag",
+    "retrieval-augmented-generation",
+    "zim",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
     "fastapi>=0.104.1",
@@ -33,15 +48,26 @@ dependencies = [
     "python-multipart>=0.0.7",
     "questionary>=2.0.0",
     "rank-bm25>=0.2.2",
+    "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2.1",
+    "pytest>=8.0.0",
+    "twine>=5.0.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/tensor-serve"
-Repository = "https://github.com/yourusername/tensor-serve"
-Issues = "https://github.com/yourusername/tensor-serve/issues"
+Homepage = "https://github.com/3M1RY33T/tensor-serve"
+Repository = "https://github.com/3M1RY33T/tensor-serve"
+Issues = "https://github.com/3M1RY33T/tensor-serve/issues"
 
 [project.scripts]
 tensor-serve = "tensor_serve:main"
+
+[tool.setuptools]
+py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 where = ["."]

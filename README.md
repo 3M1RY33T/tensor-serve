@@ -1,10 +1,12 @@
+<img align="left" width="50" height="50" src="assets/tensor.png">
+
 # Tensor (Serve)
 
-`tensor-serve` is a ZIM-based retrieval augmented proxy for any OpenAI-compatible AI. This program (optionally) lets you download ZIM documentation from the **live Kiwix OPDS catalog**, builds a local semantic vector database from them, and uses that database to provide an AI model relevany context when answering questions.
+`tensor-serve` is a ZIM-based retrieval augmented proxy for any OpenAI-compatible AI. This program lets you download ZIM documentation from the **live Kiwix OPDS catalog**, builds a local semantic vector database from it, and uses that database to provide an AI model relevant context when answering questions.
 
 The purpose of this program is to provide the service for customizing your AI for your specific needs seamlessly.
 
-Tensor works with any OpenAI-compatible endpoint — local runtimes (Ollama, LM Studio), cloud APIs (OpenAI, Anthropic), or LLM gateways (LiteLLM, vLLM). API keys enable authentication with services that require them.
+Combining `keyword search` and `semantic search`, Tensor helps produce more accurate responses for the data you have included in a ZIM database.
 
 ---
 
@@ -38,11 +40,13 @@ The query analyzer automatically selects the search strategy:
 
 Query embeddings and search results are cached with an in-memory LRU cache to reduce repeated embedding and retrieval work. If enabled, the optional cross-encoder reranker performs a second-stage pass over retrieved chunks before context is sent to the model.
 
+Detailed information about the RAG proxy implementation can be found [here](api/README.md).
+
 ---
 
 ## 3. CLI Reference
 
-[CLI Reference](cli/README.md) can be found here. Contains `ZIM File Manager` and `Configuration CLI`.
+[CLI Reference](cli/README.md) can be found here. It covers ZIM downloads, configuration, health, cache, cleanup, ingestion, vector databases, and collections.
 
 ---
 
@@ -52,78 +56,90 @@ Query embeddings and search results are cached with an in-memory LRU cache to re
 
 ---
 
+### Using With OpenAI-compatible Tools (Code Editors, etc..)
+
+**Point any OpenAI-compatible tool at `http://localhost:8000/v1`** (or `http://localhost:8000` for tools that auto-discover models):
+
+| Tool | Configuration |
+|---|---|
+| **Zed** | Settings: `assistant.openai_api_url` = `http://localhost:8000` |
+| **Cursor** | Settings → Models → OpenAI Base URL = `http://localhost:8000` |
+| **Continue (VS Code)** | `~/.continue/config.json` → `models` → `apiBase` = `http://localhost:8000/v1` |
+| **Aider** | `--openai-api-base http://localhost:8000/v1` |
+| **Open WebUI** | Admin → Connections → OpenAI API → Base URL = `http://localhost:8000/v1` |
+| **OpenAI SDKs** | `client = OpenAI(base_url="http://localhost:8000/v1")` |
+
+---
+
 ## Setup
 
 ### Prerequisites
 
-- **Python 3.8+** (check with `python3 --version`)
+- **Python 3.10+** (check with `python3 --version`)
 - **pip** (Python package manager, usually bundled with Python)
 - **An OpenAI-compatible AI endpoint** (examples: Ollama, LM Studio, OpenAI API, Anthropic, LiteLLM gateway) — optional for basic setup, required for chat functionality
 
-### Installation
+### Setup Example
 
-1. **Clone the repository** and navigate to the project directory:
-   ```bash
-   git clone https://github.com/yourusername/tensor-serve.git
-   cd tensor-serve
-   ```
+```bash
+# 1. Clone and enter the project
+git clone https://github.com/3M1RY33T/tensor-serve.git
+cd tensor-serve
 
-2. **Create a Python virtual environment** (recommended):
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
+# 2. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 3. Install Tensor Serve and its dependencies
+pip install -r requirements.txt
+pip install -e .
 
-4. **Verify installation** (optional):
-   ```bash
-   python -m tensor_serve zim list
-   ```
+# 4. Configure the upstream OpenAI-compatible AI endpoint
+tensor-serve config detect-local-ai
+tensor-serve config set-ai-endpoint \
+  --endpoint http://localhost:11434 \
+  --model mistral
 
-5. **Start the server**:
-   ```bash
-   # Basic startup (port 8000)
-   python -m tensor_serve start
-   
-   # Custom port
-   python -m tensor_serve start --port 3000
-   
-   # Auto-select available port if 8000 is in use
-   python -m tensor_serve start --auto-port
-   
-   # Development mode with auto-reload
-   python -m tensor_serve start --reload
-   ```
+# Optional: inspect models exposed by the configured endpoint
+tensor-serve config list-models
 
-   **Server Options**:
-   - `--port, -p`: Specify port (default: 8000, or `TENSOR_PORT` env var)
-   - `--host`: Host to bind to (default: 0.0.0.0, or `TENSOR_HOST` env var)
-   - `--auto-port`: Automatically find available port if specified port is in use
-   - `--reload`: Enable auto-reload for development
+# 5. Choose where ZIM files are stored
+tensor-serve config set-zim-source ./zim_files
 
-   **Environment Variables**:
-   - `TENSOR_PORT`: Default port
-   - `TENSOR_HOST`: Default host
-   - `TENSOR_AUTO_PORT=true`: Enable auto-port selection by default
+# 6. Browse and download ZIM content from Kiwix
+tensor-serve zim list
+tensor-serve zim install wikivoyage_en_europe
 
-6. **Manage ZIM files**:
-   ```bash
-   # List available ZIM files
-   python -m tensor_serve zim list
-   
-   # Show installed ZIM files
-   python -m tensor_serve zim status
-   
-   # Install a ZIM file
-   python -m tensor_serve zim install wikipedia_en_all
-   
-   # Interactive category installation
-   python -m tensor_serve zim install-category coding
-   ```
+# Optional: use an interactive category downloader instead
+# tensor-serve zim install-category coding
+
+# 7. Review the saved configuration and installed ZIM files
+tensor-serve config show
+tensor-serve zim status
+
+# 8. Start the server
+tensor-serve start
+
+# Custom port
+tensor-serve start --port 3000
+
+# Auto-select available port if 8000 is in use
+tensor-serve start --auto-port
+
+# Development mode with auto-reload
+tensor-serve start --reload
+```
+
+For cloud or gateway providers, include an API key and provider-specific endpoint:
+
+```bash
+tensor-serve config set-ai-endpoint \
+  --endpoint https://api.openai.com/v1 \
+  --model gpt-4o-mini \
+  --api-key "$OPENAI_API_KEY"
+```
+
+API keys are encrypted before they are written to `config.json`. Tensor Serve uses a local `.tensor_config.key` file by default, or you can provide `TENSOR_CONFIG_KEY` / `TENSOR_CONFIG_KEY_FILE` for deployments that manage secrets externally.
 
 ### Supported Environments
 
@@ -149,46 +165,27 @@ Query embeddings and search results are cached with an in-memory LRU cache to re
 **Prerequisites:**
 - Tensor Serve is installed (see [Setup](#setup) above)
 - An OpenAI-compatible AI endpoint is running locally or accessible via API (e.g., Ollama on `http://localhost:11434`)
-- A ZIM file is available (download via `python -m tensor_serve zim install <file_id>` or place one in `zim_files/`)
 
 **Steps:**
 
 ```bash
-# 1. Activate the virtual environment (if you created one)
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# 1. Start the server
+tensor-serve start
 
-# 2. Start the server
-python -m tensor_serve start
+# 2. Leave the server running. In another terminal, check health
+tensor-serve health
 
-# 3. In another terminal, configure AI endpoint (assuming Ollama running on port 11434)
-curl -X POST http://localhost:8000/config/set-ai-endpoint \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ai_endpoint": "http://localhost:11434",
-    "ai_model": "mistral"
-  }'
+# 3. Ingest all files from the configured ZIM source folder into a vector database
+tensor-serve ingest --source-folder --output-name travel
 
-# 4. Check health
-curl http://localhost:8000/health
+# 4. Load the database into memory
+tensor-serve db load travel
 
-# 5. Download a ZIM file (or use an existing one)
-python -m tensor_serve zim install wikipedia_en_all  # Downloads Wikipedia
+# 5. Optional: enable web search for time-sensitive queries with the configuration CLI
+tensor-serve config enable-web-search --provider duckduckgo
+tensor-serve config set-search-modes --keyword-mode auto --semantic-mode on
 
-# 6. Ingest ZIM file(s) into a vector database
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "zim_path": "zim_files/wikipedia_en_all.zim",
-    "output_name": "wiki"
-  }'
-
-# 7. Load the database into memory
-curl http://localhost:8000/load?name=wiki
-
-# 8. (Optional) Enable web search for time-sensitive queries
-curl -X POST http://localhost:8000/config/web-search/enable
-
-# 9. Start chatting through the OpenAI-compatible proxy
+# 6. Start chatting through the OpenAI-compatible proxy
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -199,7 +196,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
     ]
   }'
 
-# 10. Time-sensitive query (if web search enabled, will search web + ZIM)
+# 7. Time-sensitive query (if web search is enabled, Tensor Serve can search web + ZIM)
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{

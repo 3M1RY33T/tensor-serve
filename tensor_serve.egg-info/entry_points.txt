@@ -1,2 +1,0 @@
-[console_scripts]
-tensor-serve = tensor_serve:main

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from api.ai_client import AIClient
 from api.cache import query_cache
-from api.config import get_config_value, load_config, set_config_value
+from api.config import get_config_value, load_config, reset_config, set_config_value
 from api.embedder import Embedder
 from api.ingest import run_ingestion
 from api.multi_ingest import run_multi_ingest
@@ -23,10 +23,11 @@ from api.zim_collections import (
     get_active_collection,
     get_all_collections,
     get_collection,
-    get_collection_path,
     get_collection_with_installation_status,
     init_collections,
+    list_collection_zim_paths,
     remove_files_from_collection,
+    reset_collections,
     set_active_collection,
     update_collection,
 )
@@ -65,6 +66,20 @@ async def lifespan(app: FastAPI):
     app_state.embedder = Embedder()
     init_collections()
     app_state.active_collection = get_active_collection()
+    config = load_config()
+
+    if config.get("web_search_api_key"):
+        from api.web_search import web_search_manager
+
+        if config.get("web_search_provider") == "brave":
+            web_search_manager.set_brave_api_key(config["web_search_api_key"])
+        elif config.get("web_search_provider") == "google" and config.get(
+            "web_search_engine_id"
+        ):
+            web_search_manager.set_google_api_key(
+                config["web_search_api_key"],
+                config["web_search_engine_id"],
+            )
 
     # Auto-load the active collection's database if it was already ingested
     if app_state.active_collection:
@@ -214,6 +229,25 @@ def clear_cache():
     return {"status": "cleared"}
 
 
+def _reset_live_config_state():
+    """Apply default configuration to in-memory services after config reset."""
+    app_state.ai_client.update_config(
+        None,
+        None,
+        "openai-compatible",
+        None,
+        "Authorization",
+        "Bearer",
+        {},
+    )
+    try:
+        from api.web_search import web_search_manager
+
+        web_search_manager.reset()
+    except Exception:
+        pass
+
+
 @app.get("/config")
 def get_config():
     config = load_config()
@@ -229,6 +263,29 @@ def get_config():
         },
         "context_size": config.get("context_size", 3),
         "zim_source_folder": config.get("zim_source_folder"),
+    }
+
+
+@app.post("/config/reset")
+def reset_config_endpoint():
+    """Reset config.json to default values and refresh live config state."""
+    config = reset_config()
+    _reset_live_config_state()
+    return {
+        "status": "reset",
+        "config": {
+            "ai_provider": config.get("ai_provider", "openai-compatible"),
+            "ai_endpoint": config.get("ai_endpoint"),
+            "ai_model": config.get("ai_model"),
+            "ai_api_key_configured": bool(config.get("ai_api_key")),
+            "ai_api_key_header": config.get("ai_api_key_header", "Authorization"),
+            "ai_api_key_prefix": config.get("ai_api_key_prefix", "Bearer"),
+            "ai_extra_headers": {
+                key: "<configured>" for key in (config.get("ai_extra_headers") or {})
+            },
+            "context_size": config.get("context_size", 3),
+            "zim_source_folder": config.get("zim_source_folder"),
+        },
     }
 
 
@@ -583,6 +640,18 @@ def list_collections():
     }
 
 
+@app.post("/collections/reset")
+def reset_collections_endpoint(delete_folders: bool = True):
+    """
+    Reset collection metadata and optionally remove legacy collection folders.
+
+    ZIM files are preserved.
+    """
+    result = reset_collections(delete_folders=delete_folders)
+    app_state.active_collection = None
+    return result
+
+
 @app.get("/collections/{collection_id}")
 def get_collection_details(collection_id: str):
     collection = get_collection_with_installation_status(collection_id)
@@ -632,14 +701,14 @@ def ingest_collection(collection_id: str, zim_file_indices: list = None):
             zim_files = [zim_files[i] for i in zim_file_indices if i < len(zim_files)]
             zim_paths = [f["path"] for f in zim_files if "path" in f]
         else:
-            zim_paths = resolve_zim_inputs([get_collection_path(collection_id)])
+            zim_paths = list_collection_zim_paths(collection_id)
 
         if not zim_paths:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"No ZIM files found in collection '{collection_id}'. "
-                    f"Add .zim files to: {get_collection_path(collection_id)}"
+                    "Add .zim files to the collection first."
                 ),
             )
 
@@ -867,7 +936,7 @@ def list_installed_zim():
 
 @app.get("/zim/status/{collection_id}")
 def get_zim_installation_status(collection_id: str):
-    """Get ZIM file status for a collection folder."""
+    """Get ZIM file status for a collection."""
     collection = get_collection_with_installation_status(collection_id)
     if not collection:
         raise HTTPException(
@@ -1556,6 +1625,36 @@ def clean_working_files():
         "removed_files": removed,
         "removed_count": len(removed),
         "errors": errors,
+    }
+
+
+@app.post("/clean/all")
+def clean_all_working_state(delete_collection_folders: bool = True):
+    """
+    Reset generated databases, caches, collections, and configuration.
+
+    Preserves ZIM archives. Legacy collection folders matching collection IDs
+    are removed by default; metadata-backed collections only reset references.
+    """
+    db_result = clean_working_files()
+    query_cache.clear()
+    collections_result = reset_collections(delete_folders=delete_collection_folders)
+    config = reset_config()
+    _reset_live_config_state()
+    app_state.active_collection = None
+
+    return {
+        "status": "reset",
+        "database": db_result,
+        "cache": {"status": "cleared"},
+        "collections": collections_result,
+        "config": {
+            "ai_provider": config.get("ai_provider", "openai-compatible"),
+            "ai_endpoint": config.get("ai_endpoint"),
+            "ai_model": config.get("ai_model"),
+            "context_size": config.get("context_size", 3),
+            "zim_source_folder": config.get("zim_source_folder"),
+        },
     }
 
 

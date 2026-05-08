@@ -208,6 +208,14 @@ class WebSearchManager:
         """Configure Google Custom Search provider."""
         self.providers["google"] = GoogleCustomSearchProvider(api_key, search_engine_id)
 
+    def reset(self):
+        """Clear configured providers and cached web search results."""
+        self.default_provider = "duckduckgo"
+        self.providers = {
+            "duckduckgo": DuckDuckGoProvider(),
+        }
+        self.search_cache.clear()
+
     def search(
         self,
         query: str,

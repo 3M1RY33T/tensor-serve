@@ -5,7 +5,9 @@ Tensor Serve - CLI interface for managing ZIM files and running the server
 
 import argparse
 import json
+from pathlib import Path
 import sys
+
 
 def start_server(args):
     """Start the Tensor Serve server."""
@@ -56,11 +58,219 @@ def _print_json(value):
     print(json.dumps(value, indent=2, sort_keys=True))
 
 
+def _existing_vector_db(name):
+    index_path = Path(f"{name}.index")
+    text_path = Path(f"{name}.pkl")
+    bm25_path = Path(f"{name}.bm25")
+    return {
+        "name": name,
+        "index": str(index_path),
+        "texts": str(text_path),
+        "bm25": str(bm25_path) if bm25_path.exists() else None,
+        "complete": index_path.exists() and text_path.exists(),
+    }
+
+
+def _require_vector_db(name):
+    info = _existing_vector_db(name)
+    if not info["complete"]:
+        missing = []
+        if not Path(info["index"]).exists():
+            missing.append(info["index"])
+        if not Path(info["texts"]).exists():
+            missing.append(info["texts"])
+        raise SystemExit(
+            f"Vector database '{name}' is incomplete. Missing: {', '.join(missing)}"
+        )
+    return info
+
+
+def _human_file_size(path):
+    from api.zim_downloader import bytes_to_human
+
+    return bytes_to_human(Path(path).stat().st_size)
+
+
+def _server_request(method, server, path, params=None, timeout=60):
+    import requests
+
+    base = server.rstrip("/")
+    try:
+        response = requests.request(
+            method,
+            f"{base}{path}",
+            params=params,
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        raise SystemExit(f"Could not reach Tensor Serve at {base}: {exc}")
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {"detail": response.text}
+    if response.status_code >= 400:
+        detail = payload.get("detail", payload)
+        raise SystemExit(f"Server returned {response.status_code}: {detail}")
+    return payload
+
+
+def _server_get(server, path, params=None, timeout=60):
+    return _server_request("GET", server, path, params=params, timeout=timeout)
+
+
+def _server_post(server, path, params=None, timeout=60):
+    return _server_request("POST", server, path, params=params, timeout=timeout)
+
+
+def health_command(args):
+    result = _server_get(args.server, "/health", timeout=args.timeout)
+    _print_json(result)
+
+
+def cache_stats(args):
+    result = _server_get(args.server, "/cache/stats", timeout=args.timeout)
+    _print_json(result)
+
+
+def cache_clear(args):
+    result = _server_post(args.server, "/cache/clear", timeout=args.timeout)
+    _print_json(result)
+
+
+def cache_command(args):
+    if args.cache_command == "stats":
+        cache_stats(args)
+    elif args.cache_command == "clear":
+        cache_clear(args)
+    else:
+        raise SystemExit("Unknown cache command")
+
+
+def clean_command(args):
+    result = _server_post(args.server, "/clean", timeout=args.timeout)
+    _print_json(result)
+
+
+def reset_all_command(args):
+    result = _server_post(
+        args.server,
+        "/clean/all",
+        params={"delete_collection_folders": not args.keep_collection_folders},
+        timeout=args.timeout,
+    )
+    _print_json(result)
+
+
+def ingest_command(args):
+    from api.ingest import run_ingestion
+    from api.multi_ingest import run_multi_ingest
+    from api.zim_collections import (
+        get_collection,
+        list_collection_zim_paths,
+        set_active_collection,
+    )
+    from api.zim_downloader import get_zim_source_folder, resolve_zim_inputs
+
+    if not args.output_name:
+        raise SystemExit("Provide --output-name to name the vector database.")
+
+    source_modes = sum(
+        [
+            bool(args.paths),
+            bool(args.source_folder),
+            bool(args.collection),
+        ]
+    )
+    if source_modes != 1:
+        raise SystemExit("Use exactly one of paths, --source-folder, or --collection.")
+
+    collection_id = None
+    if args.collection:
+        collection = get_collection(args.collection)
+        if not collection:
+            raise SystemExit(f"Collection '{args.collection}' not found")
+        collection_id = args.collection
+        zim_paths = list_collection_zim_paths(args.collection)
+    elif args.source_folder:
+        inputs = [get_zim_source_folder()]
+        zim_paths = resolve_zim_inputs(inputs)
+    else:
+        inputs = args.paths
+        zim_paths = resolve_zim_inputs(inputs)
+    if not zim_paths:
+        if collection_id:
+            raise SystemExit(f"No ZIM files found in collection '{collection_id}'.")
+        raise SystemExit("No .zim files found for the provided input.")
+
+    if len(zim_paths) == 1:
+        result = run_ingestion(zim_paths[0], args.output_name)
+    else:
+        result = run_multi_ingest(zim_paths, args.output_name)
+
+    output = {**result, "db_name": args.output_name, "file_count": len(zim_paths)}
+    if collection_id:
+        set_active_collection(collection_id)
+        output["collection_id"] = collection_id
+    _print_json(output)
+
+
+def db_list(args):
+    dbs = []
+    for index_path in sorted(Path(".").glob("*.index")):
+        name = index_path.with_suffix("").name
+        info = _existing_vector_db(name)
+        info["index_size"] = _human_file_size(info["index"])
+        if Path(info["texts"]).exists():
+            info["texts_size"] = _human_file_size(info["texts"])
+        if info["bm25"]:
+            info["bm25_size"] = _human_file_size(info["bm25"])
+        dbs.append(info)
+    _print_json({"databases": dbs, "count": len(dbs)})
+
+
+def db_show(args):
+    info = _require_vector_db(args.name)
+    info["index_size"] = _human_file_size(info["index"])
+    info["texts_size"] = _human_file_size(info["texts"])
+    if info["bm25"]:
+        info["bm25_size"] = _human_file_size(info["bm25"])
+    _print_json(info)
+
+
+def db_load(args):
+    _require_vector_db(args.name)
+    result = _server_get(
+        args.server,
+        "/load",
+        params={"name": args.name},
+        timeout=args.timeout,
+    )
+    _print_json(result)
+
+
+def db_status(args):
+    result = _server_get(args.server, "/health", timeout=args.timeout)
+    _print_json(result)
+
+
+def db_command(args):
+    if args.db_command == "list":
+        db_list(args)
+    elif args.db_command == "show":
+        db_show(args)
+    elif args.db_command in ("load", "use"):
+        db_load(args)
+    elif args.db_command == "status":
+        db_status(args)
+    else:
+        raise SystemExit("Unknown db command")
+
+
 def config_show(args):
-    from api.config import load_config
+    from api.config import load_config, mask_config
     from api.zim_downloader import get_zim_source_folder, has_custom_zim_source_folder
 
-    config = load_config()
+    config = mask_config(load_config())
     config["zim_source_folder"] = get_zim_source_folder()
     config["custom_zim_source_folder"] = has_custom_zim_source_folder()
     _print_json(config)
@@ -157,6 +367,19 @@ def config_disable_web_search(args):
     config_show(args)
 
 
+def config_reset(args):
+    from api.config import reset_config
+
+    if args.server:
+        result = _server_post(args.server, "/config/reset", timeout=args.timeout)
+        _print_json(result)
+        return
+
+    reset_config()
+    print("Reset config.json to default settings")
+    config_show(args)
+
+
 def config_list_models(args):
     from api.ai_client import AIClient
     from api.config import load_config
@@ -199,12 +422,261 @@ def config_command(args):
         config_enable_web_search(args)
     elif args.config_command == "disable-web-search":
         config_disable_web_search(args)
+    elif args.config_command == "reset":
+        config_reset(args)
     elif args.config_command == "list-models":
         config_list_models(args)
     elif args.config_command == "detect-local-ai":
         config_detect_local_ai(args)
     else:
         raise SystemExit("Unknown config command")
+
+
+def collections_list(args):
+    from api.zim_collections import (
+        get_active_collection,
+        get_all_collections,
+        init_collections,
+    )
+
+    init_collections()
+    collections = get_all_collections()
+    active = get_active_collection()
+    _print_json(
+        {
+            "active": active["id"] if active else None,
+            "collections": {
+                collection_id: {
+                    "name": collection["name"],
+                    "description": collection["description"],
+                    "category": collection["category"],
+                    "path": collection["path"],
+                    "file_count": len(collection.get("zim_files", [])),
+                }
+                for collection_id, collection in collections.items()
+            },
+        }
+    )
+
+
+def collections_show(args):
+    from api.zim_collections import get_collection_with_installation_status
+
+    collection = get_collection_with_installation_status(args.collection_id)
+    if not collection:
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    _print_json({"id": args.collection_id, **collection})
+
+
+def collections_files(args):
+    from api.zim_collections import list_collection_files
+
+    files = list_collection_files(args.collection_id)
+    if files is None:
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    _print_json(
+        {"collection_id": args.collection_id, "files": files, "file_count": len(files)}
+    )
+
+
+def collections_create(args):
+    from api.zim_collections import create_custom_collection
+
+    try:
+        collection = create_custom_collection(
+            args.collection_id,
+            name=args.name,
+            description=args.description or "",
+            zim_paths=args.zim_paths or [],
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    _print_json(
+        {
+            "status": "created",
+            "collection_id": args.collection_id,
+            "name": collection["name"],
+            "path": collection["path"],
+            "file_count": len(collection.get("zim_files", [])),
+        }
+    )
+
+
+def collections_update(args):
+    from api.zim_collections import update_collection
+
+    if args.name is None and args.description is None:
+        raise SystemExit("Provide --name and/or --description.")
+    try:
+        collection = update_collection(args.collection_id, args.name, args.description)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    if not collection:
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    _print_json(
+        {
+            "status": "updated",
+            "collection_id": args.collection_id,
+            "name": collection["name"],
+            "description": collection["description"],
+            "path": collection["path"],
+            "file_count": len(collection.get("zim_files", [])),
+        }
+    )
+
+
+def collections_delete(args):
+    from api.zim_collections import delete_custom_collection
+
+    try:
+        deleted = delete_custom_collection(args.collection_id)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    if not deleted:
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    _print_json({"status": "deleted", "collection_id": args.collection_id})
+
+
+def collections_add_files(args):
+    from api.zim_collections import add_files_to_collection
+
+    try:
+        collection = add_files_to_collection(args.collection_id, args.zim_paths)
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    if not collection:
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    _print_json(
+        {
+            "status": "updated",
+            "collection_id": args.collection_id,
+            "files": collection.get("zim_files", []),
+            "file_count": len(collection.get("zim_files", [])),
+        }
+    )
+
+
+def collections_remove_files(args):
+    from api.zim_collections import remove_files_from_collection
+
+    try:
+        collection = remove_files_from_collection(
+            args.collection_id, file_names=args.files
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    if not collection:
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    _print_json(
+        {
+            "status": "updated",
+            "collection_id": args.collection_id,
+            "files": collection.get("zim_files", []),
+            "file_count": len(collection.get("zim_files", [])),
+        }
+    )
+
+
+def collections_ingest(args):
+    from api.multi_ingest import run_multi_ingest
+    from api.zim_collections import (
+        get_collection,
+        list_collection_zim_paths,
+        set_active_collection,
+    )
+
+    collection = get_collection(args.collection_id)
+    if not collection:
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    if not args.output_name:
+        raise SystemExit("Provide --output-name to name the vector database.")
+
+    zim_files = collection.get("zim_files", [])
+    if args.index:
+        selected = []
+        for index in args.index:
+            if index < 0 or index >= len(zim_files):
+                raise SystemExit(f"File index out of range: {index}")
+            selected.append(zim_files[index])
+        zim_paths = [entry["path"] for entry in selected if "path" in entry]
+    else:
+        zim_paths = list_collection_zim_paths(args.collection_id)
+
+    if not zim_paths:
+        raise SystemExit(f"No ZIM files found in collection '{args.collection_id}'.")
+
+    result = run_multi_ingest(zim_paths, args.output_name)
+    set_active_collection(args.collection_id)
+    _print_json(
+        {**result, "collection_id": args.collection_id, "db_name": args.output_name}
+    )
+
+
+def collections_use(args):
+    from api.zim_collections import get_active_collection, set_active_collection
+
+    if not set_active_collection(args.collection_id):
+        raise SystemExit(f"Collection '{args.collection_id}' not found")
+    active = get_active_collection()
+    _print_json({"status": "active", "active": active["id"] if active else None})
+
+
+def collections_active(args):
+    from api.zim_collections import get_active_collection
+
+    active = get_active_collection()
+    _print_json(
+        {
+            "active": active["id"] if active else None,
+            "collection": active["collection"] if active else None,
+        }
+    )
+
+
+def collections_reset(args):
+    from api.zim_collections import reset_collections
+
+    if args.server:
+        result = _server_post(
+            args.server,
+            "/collections/reset",
+            params={"delete_folders": not args.keep_folders},
+            timeout=args.timeout,
+        )
+        _print_json(result)
+        return
+
+    result = reset_collections(delete_folders=not args.keep_folders)
+    _print_json(result)
+
+
+def collections_command(args):
+    if args.collections_command == "list":
+        collections_list(args)
+    elif args.collections_command == "show":
+        collections_show(args)
+    elif args.collections_command == "files":
+        collections_files(args)
+    elif args.collections_command == "create":
+        collections_create(args)
+    elif args.collections_command == "update":
+        collections_update(args)
+    elif args.collections_command == "delete":
+        collections_delete(args)
+    elif args.collections_command == "add-files":
+        collections_add_files(args)
+    elif args.collections_command == "remove-files":
+        collections_remove_files(args)
+    elif args.collections_command == "ingest":
+        collections_ingest(args)
+    elif args.collections_command == "use":
+        collections_use(args)
+    elif args.collections_command == "active":
+        collections_active(args)
+    elif args.collections_command == "reset":
+        collections_reset(args)
+    else:
+        raise SystemExit("Unknown collections command")
 
 
 def main():
@@ -362,6 +834,18 @@ def main():
         help="Disable web search and use offline ZIM content only"
     )
 
+    config_reset_parser = config_subparsers.add_parser(
+        "reset",
+        help="Reset config.json to default settings"
+    )
+    config_reset_parser.add_argument(
+        "--server",
+        help="Reset configuration through a running Tensor Serve server instead of local files"
+    )
+    config_reset_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
     models_parser = config_subparsers.add_parser(
         "list-models",
         help="Probe the configured AI endpoint and list available models"
@@ -372,6 +856,258 @@ def main():
         "detect-local-ai",
         help="Detect common local AI runtimes such as Ollama or LM Studio"
     )
+
+    # Health command
+    health_parser = subparsers.add_parser(
+        "health",
+        help="Show health for a running Tensor Serve server"
+    )
+    health_parser.add_argument(
+        "--server",
+        default="http://localhost:8000",
+        help="Tensor Serve server URL (default: http://localhost:8000)"
+    )
+    health_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
+    # Cache command
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="Inspect and clear the running server's query cache"
+    )
+    cache_subparsers = cache_parser.add_subparsers(
+        dest="cache_command", help="Cache commands"
+    )
+    cache_stats_parser = cache_subparsers.add_parser(
+        "stats", help="Show query and embedding cache statistics"
+    )
+    cache_stats_parser.add_argument(
+        "--server",
+        default="http://localhost:8000",
+        help="Tensor Serve server URL (default: http://localhost:8000)"
+    )
+    cache_stats_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+    cache_clear_parser = cache_subparsers.add_parser(
+        "clear", help="Clear query and embedding caches"
+    )
+    cache_clear_parser.add_argument(
+        "--server",
+        default="http://localhost:8000",
+        help="Tensor Serve server URL (default: http://localhost:8000)"
+    )
+    cache_clear_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
+    # Cleanup command
+    clean_parser = subparsers.add_parser(
+        "clean",
+        aliases=["cleanup"],
+        help="Clean generated vector DB files through the running server"
+    )
+    clean_parser.add_argument(
+        "--server",
+        default="http://localhost:8000",
+        help="Tensor Serve server URL (default: http://localhost:8000)"
+    )
+    clean_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
+    # Full reset command
+    reset_parser = subparsers.add_parser(
+        "reset",
+        aliases=["clean-all"],
+        help="Reset generated DB files, caches, collections, and configuration"
+    )
+    reset_parser.add_argument(
+        "--server",
+        default="http://localhost:8000",
+        help="Tensor Serve server URL (default: http://localhost:8000)"
+    )
+    reset_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+    reset_parser.add_argument(
+        "--keep-collection-folders",
+        action="store_true",
+        help="Reset collection metadata but keep matching legacy collection folders"
+    )
+
+    # Ingestion command
+    ingest_parser = subparsers.add_parser(
+        "ingest",
+        help="Ingest ZIM files or folders into a vector database"
+    )
+    ingest_parser.add_argument(
+        "paths",
+        nargs="*",
+        help="One or more .zim files or directories containing .zim files"
+    )
+    ingest_parser.add_argument(
+        "--output-name", "-o",
+        required=True,
+        help="Vector database name to write"
+    )
+    ingest_parser.add_argument(
+        "--source-folder",
+        action="store_true",
+        help="Ingest every .zim file from the configured ZIM source folder"
+    )
+    ingest_parser.add_argument(
+        "--collection",
+        help="Ingest every .zim file from a named collection"
+    )
+
+    # Vector database command
+    db_parser = subparsers.add_parser(
+        "db",
+        help="List, inspect, and load vector databases"
+    )
+    db_subparsers = db_parser.add_subparsers(
+        dest="db_command", help="Vector database commands"
+    )
+
+    db_subparsers.add_parser("list", help="List local vector databases")
+
+    db_show_parser = db_subparsers.add_parser(
+        "show", help="Show local vector database files"
+    )
+    db_show_parser.add_argument("name", help="Vector database name")
+
+    db_load_parser = db_subparsers.add_parser(
+        "load",
+        aliases=["use"],
+        help="Load a vector database into a running Tensor Serve server"
+    )
+    db_load_parser.add_argument("name", help="Vector database name")
+    db_load_parser.add_argument(
+        "--server",
+        default="http://localhost:8000",
+        help="Tensor Serve server URL (default: http://localhost:8000)"
+    )
+    db_load_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
+    db_status_parser = db_subparsers.add_parser(
+        "status",
+        help="Show the running server's loaded database status"
+    )
+    db_status_parser.add_argument(
+        "--server",
+        default="http://localhost:8000",
+        help="Tensor Serve server URL (default: http://localhost:8000)"
+    )
+    db_status_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
+    # Collections command
+    collections_parser = subparsers.add_parser(
+        "collections",
+        aliases=["collection"],
+        help="Create, update, delete, and ingest ZIM collections"
+    )
+    collections_subparsers = collections_parser.add_subparsers(
+        dest="collections_command", help="Collection commands"
+    )
+
+    collections_subparsers.add_parser("list", help="List collections")
+    collections_subparsers.add_parser("active", help="Show the active collection")
+
+    collections_reset_parser = collections_subparsers.add_parser(
+        "reset",
+        help="Reset collection metadata and remove matching legacy collection folders"
+    )
+    collections_reset_parser.add_argument(
+        "--keep-folders",
+        action="store_true",
+        help="Reset metadata but keep matching legacy collection folders"
+    )
+    collections_reset_parser.add_argument(
+        "--server",
+        help="Reset collections through a running Tensor Serve server instead of local files"
+    )
+    collections_reset_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
+    collections_show_parser = collections_subparsers.add_parser(
+        "show", help="Show one collection"
+    )
+    collections_show_parser.add_argument("collection_id", help="Collection ID")
+
+    collections_files_parser = collections_subparsers.add_parser(
+        "files", help="List files in a collection"
+    )
+    collections_files_parser.add_argument("collection_id", help="Collection ID")
+
+    collections_create_parser = collections_subparsers.add_parser(
+        "create", help="Create a collection"
+    )
+    collections_create_parser.add_argument("collection_id", help="Collection ID")
+    collections_create_parser.add_argument("--name", help="Display name")
+    collections_create_parser.add_argument("--description", help="Description")
+    collections_create_parser.add_argument(
+        "--zim-path",
+        dest="zim_paths",
+        action="append",
+        help="Existing .zim file or directory to reference; repeat for multiple inputs"
+    )
+
+    collections_update_parser = collections_subparsers.add_parser(
+        "update", help="Update collection metadata"
+    )
+    collections_update_parser.add_argument("collection_id", help="Collection ID")
+    collections_update_parser.add_argument("--name", help="Display name")
+    collections_update_parser.add_argument("--description", help="Description")
+
+    collections_delete_parser = collections_subparsers.add_parser(
+        "delete", help="Delete a collection"
+    )
+    collections_delete_parser.add_argument("collection_id", help="Collection ID")
+
+    collections_add_parser = collections_subparsers.add_parser(
+        "add-files", help="Add .zim files to a collection"
+    )
+    collections_add_parser.add_argument("collection_id", help="Collection ID")
+    collections_add_parser.add_argument(
+        "zim_paths",
+        nargs="+",
+        help="One or more existing .zim files or directories containing .zim files",
+    )
+
+    collections_remove_parser = collections_subparsers.add_parser(
+        "remove-files", help="Remove .zim files from a collection by file name"
+    )
+    collections_remove_parser.add_argument("collection_id", help="Collection ID")
+    collections_remove_parser.add_argument("files", nargs="+", help="One or more file names in the collection")
+
+    collections_ingest_parser = collections_subparsers.add_parser(
+        "ingest", help="Ingest a collection into a vector database"
+    )
+    collections_ingest_parser.add_argument("collection_id", help="Collection ID")
+    collections_ingest_parser.add_argument(
+        "--output-name", "-o",
+        required=True,
+        help="Vector database name to write"
+    )
+    collections_ingest_parser.add_argument(
+        "--index",
+        action="append",
+        type=int,
+        help="Only ingest a file by its zero-based index in the collection; repeat for multiple files"
+    )
+
+    collections_use_parser = collections_subparsers.add_parser(
+        "use",
+        help="Set the active collection for startup auto-load"
+    )
+    collections_use_parser.add_argument("collection_id", help="Collection ID")
 
     args = parser.parse_args()
 
@@ -391,6 +1127,29 @@ def main():
             config_parser.print_help()
             return
         config_command(args)
+    elif args.command == "health":
+        health_command(args)
+    elif args.command == "cache":
+        if not args.cache_command:
+            cache_parser.print_help()
+            return
+        cache_command(args)
+    elif args.command in ("clean", "cleanup"):
+        clean_command(args)
+    elif args.command in ("reset", "clean-all"):
+        reset_all_command(args)
+    elif args.command == "ingest":
+        ingest_command(args)
+    elif args.command == "db":
+        if not args.db_command:
+            db_parser.print_help()
+            return
+        db_command(args)
+    elif args.command in ("collections", "collection"):
+        if not args.collections_command:
+            collections_parser.print_help()
+            return
+        collections_command(args)
     else:
         parser.print_help()
 

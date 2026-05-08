@@ -12,6 +12,7 @@ Interactive docs available at `http://localhost:8000/docs`
 | `GET` | `/config/models` | List models available at the configured endpoint (or `?endpoint=<url>` to probe any URL) |
 | `GET` | `/config/local-ai/detect` | Probe common local AI runtimes such as Ollama and LM Studio |
 | `POST` | `/config/set-ai-endpoint` | Set `ai_endpoint` and optionally `ai_model` (auto-detected if omitted) |
+| `POST` | `/config/reset` | Reset `config.json` to defaults and clear live AI/web-search configuration |
 | `PATCH` | `/config` | Update any combination of the core settings (all fields optional) |
 
 ### Cache
@@ -23,15 +24,16 @@ Interactive docs available at `http://localhost:8000/docs`
 ### Collections
 | Method | Endpoint | What it does |
 |---|---|---|
-| `GET` | `/collections` | List collection folders in the active ZIM source folder |
-| `GET` | `/collections/{collection_id}` | Details and ZIM files for one collection folder |
-| `GET` | `/collections/{collection_id}/files` | List the ZIM files referenced by one collection folder |
-| `POST` | `/collections` | Create a collection folder, optionally adding selected ZIM files |
+| `GET` | `/collections` | List metadata-backed collections and any legacy collection folders |
+| `GET` | `/collections/{collection_id}` | Details and referenced ZIM files for one collection |
+| `GET` | `/collections/{collection_id}/files` | List the ZIM files referenced by one collection |
+| `POST` | `/collections` | Create a collection by recording selected ZIM paths in `collections.json` |
+| `POST` | `/collections/reset` | Reset collection metadata and remove matching legacy collection folders by default |
 | `PATCH` | `/collections/{collection_id}` | Rename a collection or update its description |
-| `POST` | `/collections/{collection_id}/files` | Add additional `.zim` files to a collection without duplicating archives |
-| `DELETE` | `/collections/{collection_id}/files` | Delete selected `.zim` files from a collection folder |
-| `POST` | `/collections/{collection_id}/ingest` | Process all ZIM files in a collection folder into a vector database |
-| `DELETE` | `/collections/{collection_id}` | Delete collection metadata and the collection folder |
+| `POST` | `/collections/{collection_id}/files` | Add additional `.zim` file references or directories of `.zim` files to a collection |
+| `DELETE` | `/collections/{collection_id}/files` | Remove selected `.zim` references from a collection |
+| `POST` | `/collections/{collection_id}/ingest` | Process all ZIM files referenced by a collection into a vector database |
+| `DELETE` | `/collections/{collection_id}` | Delete collection metadata and any matching legacy collection folder |
 | `POST` | `/collections/custom/create` | Legacy alias for `POST /collections` |
 | `DELETE` | `/collections/custom/{collection_id}` | Legacy alias for `DELETE /collections/{collection_id}` |
 
@@ -45,7 +47,7 @@ Interactive docs available at `http://localhost:8000/docs`
 | `DELETE` | `/zim/source-folder` | Reset ZIM storage to the default `zim_files/` folder |
 | `POST` | `/zim/register` | Register one existing `.zim` file path in the manifest without downloading it |
 | `POST` | `/zim/source-folder/ingest` | Ingest every `.zim` file under the active source folder |
-| `GET` | `/zim/status/{collection_id}` | Per-file status for a collection folder |
+| `GET` | `/zim/status/{collection_id}` | Per-file status for a collection |
 | `POST` | `/zim/install` | Queue one or more ZIM files for background download by Kiwix ID |
 | `POST` | `/zim/install-category` | Queue all or selected files from a curated category |
 | `DELETE` | `/zim/uninstall/{file_id}` | Remove a ZIM file from disk and the manifest |
@@ -81,6 +83,13 @@ The `devdocs_all` bundle entry additionally includes `completed_files` and `tota
 | Method | Endpoint | What it does |
 |---|---|---|
 | `POST` | `/clean` | Delete all vector DB index files, text stores, BM25 indexes, and `__pycache__/` — preserves collections, config, manifest, and ZIM files |
+| `POST` | `/clean/all` | Reset vector DB files, caches, collections, and configuration in one request |
+
+### Reset
+| Method | Endpoint | What it does |
+|---|---|---|
+| `POST` | `/config/reset` | Reset `config.json` to default settings and clear live AI/web-search configuration |
+| `POST` | `/collections/reset` | Reset `collections.json`; removes matching legacy collection folders unless `?delete_folders=false` is passed |
 
 ### OpenAI-Compatible API
 | Method | Endpoint | What it does |
@@ -105,17 +114,6 @@ To suppress the resource footer for a request, add `"tensor_show_resources": fal
 to the `/v1/chat/completions` JSON body. Tensor removes that field before
 forwarding the request upstream.
 
-**Point any OpenAI-compatible tool at `http://localhost:8000/v1`** (or `http://localhost:8000` for tools that auto-discover models):
-
-| Tool | Configuration |
-|---|---|
-| **Zed** | Settings: `assistant.openai_api_url` = `http://localhost:8000` |
-| **Cursor** | Settings → Models → OpenAI Base URL = `http://localhost:8000` |
-| **Continue (VS Code)** | `~/.continue/config.json` → `models` → `apiBase` = `http://localhost:8000/v1` |
-| **Aider** | `--openai-api-base http://localhost:8000/v1` |
-| **Open WebUI** | Admin → Connections → OpenAI API → Base URL = `http://localhost:8000/v1` |
-| **OpenAI SDKs** | `client = OpenAI(base_url="http://localhost:8000/v1")` |
-
 ### Settings
 
 Core settings are readable via `GET /config` and writable via `PATCH /config`.
@@ -126,10 +124,10 @@ Core settings are readable via `GET /config` and writable via `PATCH /config`.
 | `ai_provider` | `openai-compatible` | Label for the upstream provider or gateway |
 | `ai_endpoint` | `null` | URL of the upstream local AI server, cloud API, or LLM gateway required for `/v1/*` proxying |
 | `ai_model` | `null` | Saved model selected for Tensor-enhanced chat; `/v1/chat/completions` requests are forwarded using this model when configured |
-| `ai_api_key` | `null` | Optional provider API key; `GET /config` only reports whether one is configured |
+| `ai_api_key` | `null` | Optional provider API key; encrypted at rest; `GET /config` only reports whether one is configured |
 | `ai_api_key_header` | `Authorization` | Header used for the API key |
 | `ai_api_key_prefix` | `Bearer` | Optional prefix prepended to the API key; use an empty string for raw-key headers |
-| `ai_extra_headers` | `{}` | Optional additional upstream headers for gateways or provider-specific requirements |
+| `ai_extra_headers` | `{}` | Optional additional upstream headers for gateways or provider-specific requirements; encrypted at rest |
 | `context_size` | `3` | Number of vector DB chunks retrieved as context per OpenAI-compatible chat request |
 | `zim_source_folder` | `null` | Optional folder to scan for existing `.zim` files and use for future downloads |
 
@@ -142,7 +140,7 @@ Advanced retrieval settings are read from `config.json`:
 | `reranker_enabled` | `false` | Whether retrieved chunks are passed through the optional cross-encoder reranker |
 | `web_search_enabled` | `false` | Whether web search is enabled for time-sensitive queries |
 | `web_search_provider` | `duckduckgo` | Which search provider to use (`duckduckgo`, `brave`, or `google`) |
-| `web_search_api_key` | `null` | API key for web search provider (if required) |
+| `web_search_api_key` | `null` | API key for web search provider (if required); encrypted at rest |
 | `web_search_engine_id` | `null` | Google Custom Search engine ID (only for Google provider) |
 | `web_search_results` | `3` | Number of web search results to retrieve per query |
 
@@ -316,9 +314,11 @@ curl -X POST http://localhost:8000/config/set-ai-endpoint \
   }'
 ```
 
-Provider secrets are stored in `config.json` by default. For a packaged app,
-store API keys in the OS keychain and pass them to Tensor at runtime instead of
-writing long-lived secrets to disk.
+Provider secrets are encrypted before they are stored in `config.json`. Tensor
+Serve creates a local `.tensor_config.key` file by default, or deployments can
+provide `TENSOR_CONFIG_KEY` or `TENSOR_CONFIG_KEY_FILE` to manage the encryption
+key externally. Keep the encryption key separate from backups or shared copies
+of `config.json`.
 
 **Example — change only context size:**
 ```bash
@@ -345,7 +345,7 @@ curl -X PATCH http://localhost:8000/config \
 curl -X DELETE http://localhost:8000/zim/source-folder
 ```
 
-**Example — create and ingest a collection folder from local ZIM paths:**
+**Example — create and ingest a collection from local ZIM paths:**
 ```bash
 curl -X POST http://localhost:8000/collections \
   -H "Content-Type: application/json" \
@@ -359,11 +359,12 @@ curl -X POST http://localhost:8000/collections \
 curl -X POST http://localhost:8000/collections/local_docs/ingest
 ```
 
-Selected ZIM files are referenced from the collection folder with lightweight
-filesystem links. Files already inside the active ZIM source folder are linked
-in place; files outside it are copied once into the source folder root and then
-linked from collections. To create an empty collection, send an empty
-`zim_paths` list.
+Selected ZIM files are recorded as path references in `collections.json`.
+Tensor Serve does not copy, hardlink, or symlink archives into a collection
+folder when creating or updating a collection. To create an empty collection,
+send an empty `zim_paths` list. Each entry may be a single `.zim` file or a
+directory; directories are expanded recursively to every `.zim` file they
+contain.
 
 **Example — rename a collection and add/remove files:**
 ```bash
@@ -380,7 +381,7 @@ curl -X DELETE http://localhost:8000/collections/local_docs/files \
   -d '{"file_names": ["sqlite.zim"]}'
 ```
 
-**Example — ingest an entire collection folder by path:**
+**Example — ingest an entire directory by path:**
 ```bash
 curl -X POST http://localhost:8000/ingest-multiple \
   -H "Content-Type: application/json" \

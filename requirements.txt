@@ -10,3 +10,4 @@ requests>=2.31.0
 python-multipart>=0.0.7
 questionary>=2.0.0
 rank-bm25>=0.2.2
+cryptography>=42.0.0

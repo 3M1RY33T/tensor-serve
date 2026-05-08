@@ -9,6 +9,7 @@ from api.zim_downloader import (
     bytes_to_human,
     get_zim_source_folder,
     init_zim_folder,
+    resolve_zim_inputs,
 )
 
 COLLECTIONS_FILE = "collections.json"
@@ -37,6 +38,7 @@ def _normalize_state(state: Dict) -> Dict:
     for collection in state["collections"].values():
         if collection.get("category") == LEGACY_COLLECTION_CATEGORY:
             collection["category"] = "collection"
+        collection.setdefault("zim_paths", [])
 
     return {
         "active": state.get("active"),
@@ -73,6 +75,46 @@ def save_collections(collections: Dict):
         json.dump(_normalize_state(collections), f, indent=2)
 
 
+def reset_collections(delete_folders: bool = True) -> Dict:
+    """Reset collection metadata and optionally remove legacy collection folders."""
+    init_zim_folder()
+    state = load_collections()
+    source = Path(get_zim_source_folder()).resolve()
+    removed_folders = []
+    errors = []
+
+    if delete_folders and source.is_dir():
+        for collection_id in sorted(state.get("collections", {})):
+            metadata = state.get("collections", {}).get(collection_id, {})
+            if not _uses_legacy_folder(metadata):
+                continue
+            try:
+                _validate_collection_id(collection_id)
+            except ValueError:
+                continue
+            folder = source / collection_id
+            if not folder.exists():
+                continue
+            try:
+                folder.resolve().relative_to(source)
+                if folder.is_symlink():
+                    folder.unlink()
+                else:
+                    shutil.rmtree(folder)
+                removed_folders.append(str(folder))
+            except Exception as exc:
+                errors.append({"folder": str(folder), "error": str(exc)})
+
+    save_collections(_default_state())
+    return {
+        "status": "reset",
+        "collections_file": COLLECTIONS_FILE,
+        "folders_removed": removed_folders,
+        "folders_removed_count": len(removed_folders),
+        "errors": errors,
+    }
+
+
 def _validate_collection_id(collection_id: str):
     path = Path(collection_id)
     if (
@@ -81,11 +123,11 @@ def _validate_collection_id(collection_id: str):
         or len(path.parts) != 1
         or collection_id in {".", ".."}
     ):
-        raise ValueError("Collection ID must be a single folder name")
+        raise ValueError("Collection ID must be a single path segment")
 
 
 def get_collection_path(collection_id: str) -> str:
-    """Return the absolute folder path for a collection."""
+    """Return the legacy folder path for a collection."""
     _validate_collection_id(collection_id)
     return str(Path(get_zim_source_folder()) / collection_id)
 
@@ -101,50 +143,115 @@ def _title_from_id(collection_id: str) -> str:
 
 def _zim_file_entry(path: str) -> Dict:
     zim_path = Path(path)
+    installed = zim_path.is_file()
     return {
         "name": zim_path.name,
         "path": str(zim_path),
-        "size": bytes_to_human(zim_path.stat().st_size),
-        "installed": True,
-        "needs_download": False,
+        "size": bytes_to_human(zim_path.stat().st_size) if installed else None,
+        "installed": installed,
+        "needs_download": not installed,
     }
 
 
+def _normalized_zim_path(path: str) -> str:
+    zim_path = Path(path).expanduser()
+    if not zim_path.is_absolute():
+        zim_path = Path.cwd() / zim_path
+    return str(zim_path.resolve(strict=False))
+
+
+def _dedupe_zim_paths(paths: List[str]) -> List[str]:
+    resolved = []
+    seen = set()
+    for path in paths:
+        zim_path = Path(path).expanduser()
+        if zim_path.suffix != ".zim":
+            continue
+        normalized = _normalized_zim_path(str(zim_path))
+        if normalized not in seen:
+            seen.add(normalized)
+            resolved.append(normalized)
+    return resolved
+
+
+def _merge_zim_paths(existing_paths: List[str], added_paths: List[str]) -> List[str]:
+    return _dedupe_zim_paths(list(existing_paths or []) + list(added_paths or []))
+
+
+def _uses_legacy_folder(metadata: Dict) -> bool:
+    return metadata.get("storage") != "metadata"
+
+
+def _legacy_collection_folder(collection_id: str) -> Path:
+    return Path(get_collection_path(collection_id))
+
+
 def list_collection_zim_paths(collection_id: str) -> List[str]:
-    """Return all .zim files in a collection folder."""
-    folder = Path(get_collection_path(collection_id))
-    if not folder.is_dir():
-        return []
-    return sorted(
-        str(candidate.absolute())
-        for candidate in folder.rglob("*.zim")
-        if candidate.is_file()
-    )
+    """Return all existing .zim files referenced by a collection."""
+    metadata = _collection_metadata(collection_id)
+    zim_paths = [
+        path
+        for path in _dedupe_zim_paths(metadata.get("zim_paths", []))
+        if Path(path).is_file()
+    ]
+
+    legacy_folder = _legacy_collection_folder(collection_id)
+    if _uses_legacy_folder(metadata) and legacy_folder.is_dir():
+        zim_paths = _merge_zim_paths(
+            zim_paths,
+            sorted(
+                str(candidate.resolve())
+                for candidate in legacy_folder.rglob("*.zim")
+                if candidate.is_file()
+            ),
+        )
+
+    return zim_paths
 
 
-def _build_collection(collection_id: str, folder: Path, metadata: Dict) -> Dict:
-    zim_paths = list_collection_zim_paths(collection_id)
-    zim_files = [_zim_file_entry(path) for path in zim_paths]
+def _build_collection(collection_id: str, folder: Optional[Path], metadata: Dict) -> Dict:
+    referenced_paths = _dedupe_zim_paths(metadata.get("zim_paths", []))
+    uses_legacy_folder = _uses_legacy_folder(metadata)
+    if uses_legacy_folder and folder and folder.is_dir():
+        referenced_paths = _merge_zim_paths(
+            referenced_paths,
+            sorted(
+                str(candidate.resolve())
+                for candidate in folder.rglob("*.zim")
+                if candidate.is_file()
+            ),
+        )
+    zim_files = [_zim_file_entry(path) for path in referenced_paths]
     return {
         "name": metadata.get("name") or _title_from_id(collection_id),
         "description": metadata.get("description", ""),
         "category": "collection",
-        "path": str(folder),
+        "path": str(folder) if uses_legacy_folder and folder and folder.is_dir() else None,
+        "storage": "folder" if uses_legacy_folder and folder and folder.is_dir() else "metadata",
         "zim_files": zim_files,
         "created_at": metadata.get("created_at"),
     }
 
 
 def get_all_collections() -> Dict:
-    """Get all collection folders in the active ZIM source folder."""
+    """Get all metadata collections, plus legacy folder-backed collections."""
     init_zim_folder()
     source = Path(get_zim_source_folder())
     state = load_collections()
     metadata = state.get("collections", {})
-    collections = {}
+    collections = {
+        collection_id: _build_collection(
+            collection_id,
+            _legacy_collection_folder(collection_id),
+            collection_metadata,
+        )
+        for collection_id, collection_metadata in metadata.items()
+    }
 
     if source.is_dir():
         for folder in sorted(path for path in source.iterdir() if path.is_dir()):
+            if folder.name in collections:
+                continue
             collections[folder.name] = _build_collection(
                 folder.name, folder, metadata.get(folder.name, {})
             )
@@ -153,14 +260,15 @@ def get_all_collections() -> Dict:
 
 
 def get_collection(collection_id: str) -> Optional[Dict]:
-    """Get a specific collection folder by ID."""
+    """Get a collection by ID."""
     try:
-        folder = Path(get_collection_path(collection_id))
+        folder = _legacy_collection_folder(collection_id)
     except ValueError:
         return None
-    if not folder.is_dir():
+    metadata = _collection_metadata(collection_id)
+    if not metadata and not folder.is_dir():
         return None
-    return _build_collection(collection_id, folder, _collection_metadata(collection_id))
+    return _build_collection(collection_id, folder, metadata)
 
 
 def _now() -> str:
@@ -171,114 +279,31 @@ def _collection_folder(collection_id: str) -> Path:
     return Path(get_collection_path(collection_id))
 
 
-def _source_folder() -> Path:
-    return Path(get_zim_source_folder()).resolve()
-
-
-def _is_inside(path: Path, folder: Path) -> bool:
-    try:
-        path.resolve().relative_to(folder.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-def _same_file(path_a: Path, path_b: Path) -> bool:
-    try:
-        return path_a.samefile(path_b)
-    except OSError:
-        return False
-
-
-def _unique_source_target(zim_path: Path) -> Path:
-    source = _source_folder()
-    target = source / zim_path.name
-    if not target.exists():
-        return target
-
-    if _same_file(target, zim_path):
-        return target
-
-    index = 2
-    while True:
-        candidate = source / f"{zim_path.stem}-{index}{zim_path.suffix}"
-        if not candidate.exists():
-            return candidate
-        if _same_file(candidate, zim_path):
-            return candidate
-        index += 1
-
-
-def _canonical_zim_path(zim_path: Path) -> Path:
-    """Return a ZIM path under the source folder, copying external files once."""
-    if not zim_path.is_file() or zim_path.suffix != ".zim":
-        raise ValueError(f"Path must point to an existing .zim file: {zim_path}")
-
-    zim_path = zim_path.resolve()
-    if _is_inside(zim_path, _source_folder()):
-        return zim_path
-
-    source = _source_folder()
-    source.mkdir(parents=True, exist_ok=True)
-    target = _unique_source_target(zim_path)
-    if not target.exists():
-        shutil.copy2(zim_path, target)
-    return target.resolve()
-
-
-def _relative_link_target(source: Path, target_folder: Path) -> str:
-    return os.path.relpath(source, start=target_folder)
-
-
-def _link_zim_into_collection(collection_folder: Path, zim_path: Path) -> str:
-    """Reference a ZIM from a collection without duplicating archive bytes."""
-    source = _canonical_zim_path(zim_path)
-    target = collection_folder / source.name
-
-    if target.resolve(strict=False) == source.resolve(strict=False):
-        return str(target)
-
-    if target.exists() or target.is_symlink():
-        if _same_file(target, source):
-            return str(target)
-        raise ValueError(
-            f"Collection already contains a different file named {target.name}"
-        )
-
-    try:
-        os.link(source, target)
-    except OSError:
-        try:
-            target.symlink_to(_relative_link_target(source, collection_folder))
-        except OSError as e:
-            raise ValueError(
-                "Could not create a filesystem link for the ZIM file"
-            ) from e
-    return str(target.resolve())
-
-
 def create_custom_collection(
     collection_id: str,
     name: Optional[str] = None,
     description: str = "",
     zim_paths: Optional[List[str]] = None,
 ) -> Dict:
-    """Create a collection folder in the active ZIM source folder."""
+    """Create a metadata-backed collection without copying or linking files."""
     _validate_collection_id(collection_id)
     init_zim_folder()
-    folder = _collection_folder(collection_id)
-    folder.mkdir(parents=True, exist_ok=True)
-
-    for path in zim_paths or []:
-        _link_zim_into_collection(folder, Path(path).expanduser().resolve())
+    resolved_zim_paths = resolve_zim_inputs(zim_paths or [])
+    if zim_paths and not resolved_zim_paths:
+        raise ValueError("No .zim files found for the provided paths")
 
     state = load_collections()
     state.setdefault("collections", {})
     existing = state["collections"].get(collection_id, {})
+    existing_paths = existing.get("zim_paths", []) or list_collection_zim_paths(
+        collection_id
+    )
     state["collections"][collection_id] = {
         "name": name or existing.get("name") or _title_from_id(collection_id),
         "description": description,
         "category": "collection",
+        "storage": "metadata",
+        "zim_paths": _merge_zim_paths(existing_paths, resolved_zim_paths),
         "created_at": existing.get("created_at") or _now(),
         "updated_at": _now(),
     }
@@ -291,7 +316,7 @@ def update_collection(
     name: Optional[str] = None,
     description: Optional[str] = None,
 ) -> Optional[Dict]:
-    """Update collection metadata without changing the collection folder name."""
+    """Update collection metadata without changing the collection ID."""
     collection = get_collection(collection_id)
     if not collection:
         return None
@@ -312,7 +337,10 @@ def update_collection(
         metadata["name"] = name
     if description is not None:
         metadata["description"] = description
+    if not metadata.get("zim_paths"):
+        metadata["zim_paths"] = list_collection_zim_paths(collection_id)
     metadata["category"] = "collection"
+    metadata["storage"] = "metadata"
     metadata["updated_at"] = _now()
 
     save_collections(state)
@@ -320,31 +348,36 @@ def update_collection(
 
 
 def add_files_to_collection(collection_id: str, zim_paths: List[str]) -> Optional[Dict]:
-    """Add one or more .zim files to a collection without duplicating archives."""
+    """Add .zim file references or directories of .zim file references."""
     collection = get_collection(collection_id)
     if not collection:
         return None
 
-    folder = _collection_folder(collection_id)
-    for path in zim_paths:
-        _link_zim_into_collection(folder, Path(path).expanduser().resolve())
+    resolved_zim_paths = resolve_zim_inputs(zim_paths)
+    if not resolved_zim_paths:
+        raise ValueError("No .zim files found for the provided paths")
 
     state = load_collections()
-    if collection_id in state.get("collections", {}):
-        state["collections"][collection_id]["updated_at"] = _now()
-        save_collections(state)
+    state.setdefault("collections", {})
+    metadata = state["collections"].setdefault(
+        collection_id,
+        {
+            "name": collection["name"],
+            "description": collection["description"],
+            "category": "collection",
+            "storage": "metadata",
+            "created_at": collection.get("created_at") or _now(),
+            "zim_paths": list_collection_zim_paths(collection_id),
+        },
+    )
+    metadata["zim_paths"] = _merge_zim_paths(
+        metadata.get("zim_paths", []), resolved_zim_paths
+    )
+    metadata["category"] = "collection"
+    metadata["storage"] = "metadata"
+    metadata["updated_at"] = _now()
+    save_collections(state)
     return get_collection(collection_id)
-
-
-def _candidate_in_collection(collection_folder: Path, candidate: Path) -> Optional[Path]:
-    if not candidate.is_absolute():
-        candidate = collection_folder / candidate
-    candidate = candidate.expanduser().absolute()
-    try:
-        candidate.relative_to(collection_folder.absolute())
-    except ValueError:
-        return None
-    return candidate
 
 
 def remove_files_from_collection(
@@ -352,32 +385,42 @@ def remove_files_from_collection(
     file_names: Optional[List[str]] = None,
     zim_paths: Optional[List[str]] = None,
 ) -> Optional[Dict]:
-    """Remove ZIM files from a collection folder."""
+    """Remove ZIM file references from a collection."""
     collection = get_collection(collection_id)
     if not collection:
         return None
 
-    folder = _collection_folder(collection_id)
     requested = list(file_names or []) + list(zim_paths or [])
-    existing_by_name = {
-        Path(path).name: Path(path)
-        for path in list_collection_zim_paths(collection_id)
-    }
+    requested_names = {Path(raw).name for raw in requested if raw}
+    requested_paths = {_normalized_zim_path(raw) for raw in requested if raw}
 
-    removed = False
-    for raw in requested:
-        path = existing_by_name.get(raw)
-        if path is None:
-            path = _candidate_in_collection(folder, Path(raw))
-        if path and path.exists() and path.is_file() and path.suffix == ".zim":
-            path.unlink()
-            removed = True
+    state = load_collections()
+    state.setdefault("collections", {})
+    metadata = state["collections"].setdefault(
+        collection_id,
+        {
+            "name": collection["name"],
+            "description": collection["description"],
+            "category": "collection",
+            "storage": "metadata",
+            "created_at": collection.get("created_at") or _now(),
+            "zim_paths": list_collection_zim_paths(collection_id),
+        },
+    )
 
-    if removed:
-        state = load_collections()
-        if collection_id in state.get("collections", {}):
-            state["collections"][collection_id]["updated_at"] = _now()
-            save_collections(state)
+    existing_paths = _dedupe_zim_paths(metadata.get("zim_paths", []))
+    remaining_paths = [
+        path
+        for path in existing_paths
+        if Path(path).name not in requested_names and path not in requested_paths
+    ]
+
+    if len(remaining_paths) != len(existing_paths):
+        metadata["zim_paths"] = remaining_paths
+        metadata["category"] = "collection"
+        metadata["storage"] = "metadata"
+        metadata["updated_at"] = _now()
+        save_collections(state)
 
     return get_collection(collection_id)
 
@@ -403,8 +446,9 @@ def get_active_collection() -> Optional[Dict]:
 
 
 def delete_custom_collection(collection_id: str) -> bool:
-    """Delete collection metadata and its collection folder."""
+    """Delete collection metadata and any legacy folder for that collection."""
     state = load_collections()
+    metadata = state.get("collections", {}).get(collection_id, {})
     existed = collection_id in state.get("collections", {})
     state.get("collections", {}).pop(collection_id, None)
 
@@ -416,7 +460,7 @@ def delete_custom_collection(collection_id: str) -> bool:
     except ValueError:
         folder = None
 
-    if folder and folder.exists():
+    if folder and folder.exists() and _uses_legacy_folder(metadata):
         existed = True
         source = Path(get_zim_source_folder()).resolve()
         try:
@@ -436,10 +480,10 @@ def list_collection_files(collection_id: str) -> Optional[List[Dict]]:
 
 
 def get_installed_paths_for_collection(collection_id: str) -> List[str]:
-    """Get local file paths for files in a collection folder."""
+    """Get local file paths for files referenced by a collection."""
     return list_collection_zim_paths(collection_id)
 
 
 def get_collection_with_installation_status(collection_id: str) -> Optional[Dict]:
-    """Get collection details with file status for each ZIM in its folder."""
+    """Get collection details with file status for each referenced ZIM."""
     return get_collection(collection_id)
