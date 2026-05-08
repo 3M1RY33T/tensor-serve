@@ -1587,12 +1587,13 @@ def clean_working_files():
     - Vector database text stores (*.pkl)
     - BM25 keyword index files (*.bm25)
     - Python bytecode cache (__pycache__/)
+    - Build artifacts (build/, dist/, *.egg-info/)
+    - Configuration files (auto-generated on startup)
+    - Collection metadata (auto-generated on startup)
+    - ZIM manifest (auto-rebuilt on next scan)
 
     Preserves:
-    - collections.json  (collection configuration)
-    - config.json   (AI endpoint settings)
-    - zim_manifest.json (installed ZIM record)
-    - configured ZIM source folder files
+    - configured ZIM source folder files (ZIM archives are not deleted)
     """
     removed = []
     errors = []
@@ -1613,6 +1614,32 @@ def clean_working_files():
             removed.append("__pycache__/")
         except Exception as e:
             errors.append({"file": "__pycache__/", "error": str(e)})
+
+    # Remove build artifacts
+    for directory in ("build", "dist"):
+        if os.path.isdir(directory):
+            try:
+                shutil.rmtree(directory)
+                removed.append(f"{directory}/")
+            except Exception as e:
+                errors.append({"file": f"{directory}/", "error": str(e)})
+
+    # Remove .egg-info directories
+    for egg_info_dir in sorted(glob.glob("*.egg-info")):
+        try:
+            shutil.rmtree(egg_info_dir)
+            removed.append(f"{egg_info_dir}/")
+        except Exception as e:
+            errors.append({"file": f"{egg_info_dir}/", "error": str(e)})
+
+    # Remove auto-generated configuration and metadata files
+    for filename in ("zim_manifest.json", "config.json", "collections.json"):
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+                removed.append(filename)
+            except Exception as e:
+                errors.append({"file": filename, "error": str(e)})
 
     # Reset in-memory vector DB state so stale handles are not used
     app_state.db = None

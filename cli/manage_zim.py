@@ -214,9 +214,13 @@ def clean_working_files():
     print("  • Vector DB text stores (*.pkl)")
     print("  • BM25 keyword index files (*.bm25)")
     print("  • Python bytecode cache (__pycache__/)")
+    print("  • Build artifacts (build/, dist/, *.egg-info/)")
+    print("  • Configuration file (config.json - auto-generated on startup)")
+    print("  • Collection metadata (collections.json - auto-generated on startup)")
+    print("  • ZIM manifest (zim_manifest.json - auto-rebuilt on next scan)")
     print("\nThis will NOT remove:")
-    print("  • collections.json, config.json, zim_manifest.json")
-    print(f"  • ZIM files in {get_zim_source_folder()}/\n")
+    print("  • ZIM files in the ZIM source folder")
+    print(f"  • (Located in: {get_zim_source_folder()}/)\n")
 
     confirm = questionary.confirm("Proceed with cleanup?").ask()
     if not confirm:
@@ -227,12 +231,44 @@ def clean_working_files():
 
     for pattern in ("*.index", "*.pkl", "*.bm25"):
         for path in sorted(glob.glob(pattern)):
-            os.remove(path)
-            removed.append(path)
+            try:
+                os.remove(path)
+                removed.append(path)
+            except Exception as e:
+                print(f"  ✗ Error removing {path}: {e}")
 
     if os.path.isdir("__pycache__"):
-        shutil.rmtree("__pycache__")
-        removed.append("__pycache__/")
+        try:
+            shutil.rmtree("__pycache__")
+            removed.append("__pycache__/")
+        except Exception as e:
+            print(f"  ✗ Error removing __pycache__/: {e}")
+
+    # Remove build artifacts
+    for directory in ("build", "dist"):
+        if os.path.isdir(directory):
+            try:
+                shutil.rmtree(directory)
+                removed.append(f"{directory}/")
+            except Exception as e:
+                print(f"  ✗ Error removing {directory}/: {e}")
+
+    # Remove .egg-info directories
+    for egg_info_dir in sorted(glob.glob("*.egg-info")):
+        try:
+            shutil.rmtree(egg_info_dir)
+            removed.append(f"{egg_info_dir}/")
+        except Exception as e:
+            print(f"  ✗ Error removing {egg_info_dir}/: {e}")
+
+    # Remove auto-generated configuration and metadata files
+    for filename in ("zim_manifest.json", "config.json", "collections.json"):
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+                removed.append(filename)
+            except Exception as e:
+                print(f"  ✗ Error removing {filename}: {e}")
 
     if removed:
         print(f"\n✓ Removed {len(removed)} item(s):")

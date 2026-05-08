@@ -1,0 +1,17 @@
+services:
+  tensor-serve:
+    build:
+      context: .
+    image: ghcr.io/3m1ry33t/tensor-serve:local
+    ports:
+      - "8000:8000"
+    environment:
+      TENSOR_HOST: 0.0.0.0
+      TENSOR_PORT: 8000
+      TENSOR_CONFIG_KEY_FILE: /data/.tensor_config.key
+    volumes:
+      - tensor_data:/data
+    restart: unless-stopped
+
+volumes:
+  tensor_data:
