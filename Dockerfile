@@ -21,7 +21,7 @@ COPY pyproject.toml README.md LICENSE MANIFEST.in requirements.txt ./
 COPY api ./api
 COPY cli ./cli
 COPY tensor_serve ./tensor_serve
-COPY main.py RELEASE.md ./
+COPY main.py ./
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install --index-url "${TORCH_INDEX_URL}" torch \
