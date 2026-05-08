@@ -79,54 +79,84 @@ Detailed information about the RAG proxy implementation can be found [here](api/
 
 ### Setup Example
 
-```bash
-# 1. Clone and enter the project
-git clone https://github.com/3M1RY33T/tensor-serve.git
-cd tensor-serve
+**1. Install via pip:**
 
-# 2. Create and activate a virtual environment
+```bash
+pip install tensor-serve
+```
+
+**2. Create and activate a virtual environment (optional but recommended):**
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install tensor-serve
+```
 
-# 3. Install Tensor Serve and its dependencies
-pip install -r requirements.txt
-pip install -e .
+**3. Configure the upstream OpenAI-compatible AI endpoint:**
 
-# 4. Configure the upstream OpenAI-compatible AI endpoint
+```bash
 tensor-serve config detect-local-ai
 tensor-serve config set-ai-endpoint \
   --endpoint http://localhost:11434 \
   --model mistral
+```
 
-# Optional: inspect models exposed by the configured endpoint
+Optional: inspect models exposed by the configured endpoint:
+
+```bash
 tensor-serve config list-models
+```
 
-# 5. Choose where ZIM files are stored
+**4. Choose where ZIM files are stored:**
+
+```bash
 tensor-serve config set-zim-source ./zim_files
+```
 
-# 6. Browse and download ZIM content from Kiwix
+**5. Browse and download ZIM content from Kiwix:**
+
+```bash
 tensor-serve zim list
 tensor-serve zim install wikivoyage_en_europe
+```
 
-# Optional: use an interactive category downloader instead
-# tensor-serve zim install-category coding
+Optional: use an interactive category downloader instead:
 
-# 7. Review the saved configuration and installed ZIM files
+```bash
+tensor-serve zim install-category coding
+```
+
+**6. Review the saved configuration and installed ZIM files:**
+
+```bash
 tensor-serve config show
 tensor-serve zim status
-
-# 8. Start the server
-tensor-serve start
-
-# Custom port
-tensor-serve start --port 3000
-
-# Auto-select available port if 8000 is in use
-tensor-serve start --auto-port
-
-# Development mode with auto-reload
-tensor-serve start --reload
 ```
+
+**7. Start the server:**
+
+```bash
+tensor-serve start
+```
+
+Other start options:
+
+```bash
+tensor-serve start --port 3000              # Custom port
+tensor-serve start --auto-port              # Auto-select available port if 8000 is in use
+tensor-serve start --reload                 # Development mode with auto-reload
+```
+
+> **Note:** If you prefer to install from source (development), clone the repository and install in editable mode:
+> ```bash
+> git clone https://github.com/3M1RY33T/tensor-serve.git
+> cd tensor-serve
+> python3 -m venv .venv
+> source .venv/bin/activate
+> pip install -r requirements.txt
+> pip install -e .
+> ```
 
 For cloud or gateway providers, include an API key and provider-specific endpoint:
 
