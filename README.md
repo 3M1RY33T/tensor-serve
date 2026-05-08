@@ -251,3 +251,9 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 - **Web search** (when enabled): adds 1-3 seconds per time-sensitive query; cached results are instant; disabled by default (zero overhead)
 
 ---
+
+## Contributing
+
+Thanks for helping improve Tensor Serve.
+
+Please refer to [Contributing](./CONTRIBUTING.md) for more information.
