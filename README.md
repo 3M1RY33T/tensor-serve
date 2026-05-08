@@ -1,4 +1,4 @@
-<img align="left" width="50" height="50" src="assets/tensor.png">
+<img align="left" width="30" height="30" src="assets/tensor.png">
 
 # Tensor (Serve)
 
