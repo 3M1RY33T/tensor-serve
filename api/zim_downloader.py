@@ -6,16 +6,18 @@ from typing import Dict, List, Optional
 
 import requests
 
+from api.config import get_config_value, set_config_value
+
 ZIM_FOLDER = "zim_files"
 MANIFEST_FILE = "zim_manifest.json"
 
 KIWIX_API = "https://library.kiwix.org/catalog/v2/entries"
 _ATOM_NS = "http://www.w3.org/2005/Atom"
 
-# Mapping of preset tuning IDs to their Kiwix <name> identifiers.
+# Mapping of category names to their Kiwix <name> identifiers.
 # Each "id" must exactly match the <name> field returned by the Kiwix OPDS catalog.
-PRESET_FILES = {
-    "research": [
+CATEGORY_FILES = {
+    "Research": [
         {
             "id": "wikipedia_en_all",
             "name": "Wikipedia (English)",
@@ -47,7 +49,7 @@ PRESET_FILES = {
             "size": "~67MB",
         },
     ],
-    "learn": [
+    "Learning": [
         {
             "id": "wikiversity_en_all",
             "name": "Wikiversity",
@@ -61,7 +63,7 @@ PRESET_FILES = {
             "size": "~3GB",
         },
     ],
-    "literature": [
+    "Literature": [
         {
             "id": "gutenberg_en_all",
             "name": "Project Gutenberg",
@@ -81,7 +83,7 @@ PRESET_FILES = {
             "size": "~80MB",
         },
     ],
-    "coding": [
+    "Coding": [
         {
             "id": "stackoverflow.com_en_all",
             "name": "Stack Overflow",
@@ -127,9 +129,104 @@ def get_file_progress(file_id: str) -> Optional[Dict]:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_folder(path: str) -> str:
+    """Return a stable absolute folder path for user-provided ZIM storage."""
+    return os.path.abspath(os.path.expanduser(path))
+
+
+def has_custom_zim_source_folder() -> bool:
+    """Return True when the user has configured a non-default ZIM source folder."""
+    return bool(get_config_value("zim_source_folder"))
+
+
+def get_zim_source_folder() -> str:
+    """Return the folder used for ZIM downloads and disk scans."""
+    configured = get_config_value("zim_source_folder")
+    if configured:
+        return _normalize_folder(configured)
+    return os.path.abspath(ZIM_FOLDER)
+
+
+def list_zim_files_in_path(path: str) -> List[str]:
+    """Return all .zim files represented by a file or directory path."""
+    zim_path = Path(path).expanduser()
+    if not zim_path.is_absolute():
+        zim_path = Path.cwd() / zim_path
+
+    if zim_path.is_file():
+        return [str(zim_path.resolve())] if zim_path.suffix == ".zim" else []
+
+    if not zim_path.is_dir():
+        return []
+
+    return sorted(
+        str(candidate.resolve())
+        for candidate in zim_path.rglob("*.zim")
+        if candidate.is_file()
+    )
+
+
+def _zim_file_identity(path: str):
+    try:
+        stat = os.stat(path)
+        return ("inode", stat.st_dev, stat.st_ino)
+    except OSError:
+        return ("path", os.path.abspath(path))
+
+
+def resolve_zim_inputs(paths: List[str]) -> List[str]:
+    """Expand a list of .zim files and/or directories into unique .zim paths."""
+    resolved = []
+    seen = set()
+    for path in paths:
+        for zim_path in list_zim_files_in_path(path):
+            identity = _zim_file_identity(zim_path)
+            if identity not in seen:
+                seen.add(identity)
+                resolved.append(zim_path)
+    return resolved
+
+
+def _manifest_id_for_zim_path(path: str) -> str:
+    """Return a stable manifest ID for a ZIM path in the source folder."""
+    zim_path = Path(path).resolve()
+    try:
+        relative = zim_path.relative_to(Path(get_zim_source_folder()).resolve())
+    except ValueError:
+        return zim_path.stem
+
+    if len(relative.parts) == 1:
+        return relative.stem
+    return "__".join(relative.with_suffix("").parts)
+
+
+def _source_path_sort_key(path: str):
+    zim_path = Path(path).resolve()
+    try:
+        relative = zim_path.relative_to(Path(get_zim_source_folder()).resolve())
+        return (len(relative.parts), str(relative))
+    except ValueError:
+        return (999, str(zim_path))
+
+
+def set_zim_source_folder(path: str) -> str:
+    """Save a user-provided folder for existing and future ZIM files."""
+    folder = _normalize_folder(path)
+    if not os.path.isdir(folder):
+        raise ValueError(f"ZIM source folder does not exist: {folder}")
+    set_config_value("zim_source_folder", folder)
+    return folder
+
+
+def clear_zim_source_folder() -> str:
+    """Reset ZIM storage back to the default local folder."""
+    set_config_value("zim_source_folder", None)
+    return get_zim_source_folder()
+
+
 def init_zim_folder():
-    """Create ZIM files folder if it doesn't exist."""
-    os.makedirs(ZIM_FOLDER, exist_ok=True)
+    """Create the active ZIM folder if it doesn't exist."""
+    os.makedirs(get_zim_source_folder(), exist_ok=True)
 
 
 def init_manifest():
@@ -252,8 +349,16 @@ def get_kiwix_file_info(file_id: str) -> Optional[Dict]:
 
 
 def list_available_files() -> Dict[str, List[Dict]]:
-    """Return all available files grouped by tuning preset."""
-    return PRESET_FILES
+    """Return all available files grouped by category."""
+    return CATEGORY_FILES
+
+
+def normalize_category_id(category_id: str) -> Optional[str]:
+    """Return the canonical category name for a user-provided category string."""
+    for name in CATEGORY_FILES:
+        if name.lower() == category_id.lower():
+            return name
+    return None
 
 
 def scan_zim_folder() -> Dict:
@@ -261,7 +366,7 @@ def scan_zim_folder() -> Dict:
     Reconcile the manifest with what is actually on disk.
 
     * Removes manifest entries whose .zim file no longer exists on disk.
-    * Auto-registers any .zim files found in ``zim_files/`` that are not yet
+    * Auto-registers any .zim files found in the active ZIM folder that are not yet
       tracked (e.g. files placed there manually or downloaded outside the tool).
 
     All paths are stored and compared as absolute paths so the function works
@@ -269,7 +374,7 @@ def scan_zim_folder() -> Dict:
 
     Returns the up-to-date installed dict (also saved to the manifest).
     """
-    zim_dir = os.path.abspath(ZIM_FOLDER)
+    zim_dir = get_zim_source_folder()
     if not os.path.isdir(zim_dir):
         return load_manifest().get("installed", {})
 
@@ -278,35 +383,45 @@ def scan_zim_folder() -> Dict:
     changed = False
 
     # Normalise every existing manifest path to absolute for consistent comparison
-    tracked_paths = {os.path.abspath(v["path"]) for v in installed.values()}
+    tracked_paths = set()
+    tracked_identities = set()
 
-    # 1. Purge stale entries — file was deleted from disk
-    stale = [
-        fid
-        for fid, info in list(installed.items())
-        if not os.path.exists(os.path.abspath(info["path"]))
-    ]
+    # 1. Purge stale entries and duplicate manifest entries that point to the
+    # same archive through collection links.
+    stale = []
+    for fid, info in list(installed.items()):
+        path = os.path.abspath(info["path"])
+        if not os.path.exists(path):
+            stale.append(fid)
+            continue
+        identity = _zim_file_identity(path)
+        if identity in tracked_identities:
+            stale.append(fid)
+            continue
+        tracked_paths.add(path)
+        tracked_identities.add(identity)
+
     for fid in stale:
         del installed[fid]
         changed = True
 
     # 2. Register untracked .zim files found on disk
-    for fname in os.listdir(zim_dir):
-        if not fname.endswith(".zim"):
+    for fpath in sorted(list_zim_files_in_path(zim_dir), key=_source_path_sort_key):
+        identity = _zim_file_identity(fpath)
+        if fpath in tracked_paths or identity in tracked_identities:
             continue
-        fpath = os.path.join(zim_dir, fname)  # always absolute
-        if fpath in tracked_paths:
-            continue
-        stem = fname[:-4]  # strip .zim
         size_bytes = os.path.getsize(fpath)
-        installed[stem] = {
+        file_id = _manifest_id_for_zim_path(fpath)
+        installed[file_id] = {
+            "id": file_id,
             "path": fpath,
-            "title": stem,
+            "title": Path(fpath).stem,
             "size": bytes_to_human(size_bytes),
             "installed_at": os.path.getmtime(fpath),
             "untracked": True,
         }
         tracked_paths.add(fpath)
+        tracked_identities.add(identity)
         changed = True
 
     if changed:
@@ -319,6 +434,34 @@ def scan_zim_folder() -> Dict:
 def list_installed_files() -> Dict:
     """Return all installed ZIM files, including any untracked files found on disk."""
     return scan_zim_folder()
+
+
+def register_zim_file(
+    path: str, file_id: Optional[str] = None, title: Optional[str] = None
+) -> Dict:
+    """Record an existing local ZIM file in the manifest without downloading it."""
+    zim_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isfile(zim_path):
+        raise ValueError(f"ZIM file does not exist: {zim_path}")
+    if not zim_path.endswith(".zim"):
+        raise ValueError(f"Path must point to a .zim file: {zim_path}")
+
+    zim_id = file_id or Path(zim_path).stem
+    zim_title = title or zim_id
+    size_bytes = os.path.getsize(zim_path)
+
+    manifest = load_manifest()
+    manifest.setdefault("installed", {})
+    manifest["installed"][zim_id] = {
+        "id": zim_id,
+        "path": zim_path,
+        "title": zim_title,
+        "size": bytes_to_human(size_bytes),
+        "installed_at": os.path.getmtime(zim_path),
+        "registered": True,
+    }
+    save_manifest(manifest)
+    return manifest["installed"][zim_id]
 
 
 def is_file_installed(file_id: str) -> bool:
@@ -338,18 +481,19 @@ def _count_installed_devdocs() -> int:
     return sum(1 for k in list_installed_files() if k.startswith("devdocs_en_"))
 
 
-def get_installed_files_for_preset(preset_id: str) -> List[str]:
-    """Return disk paths of installed files for a specific preset.
+def get_installed_files_for_collection(category_id: str) -> List[str]:
+    """Return disk paths of installed files for a specific category.
 
     For the virtual 'devdocs_all' bundle, expands to the individual paths of
     every devdocs_en_* entry present in the manifest.
     """
-    if preset_id not in PRESET_FILES:
+    category_id = normalize_category_id(category_id)
+    if not category_id:
         return []
 
     installed = list_installed_files()
     result = []
-    for file_info in PRESET_FILES[preset_id]:
+    for file_info in CATEGORY_FILES[category_id]:
         file_id = file_info["id"]
         if file_id == "devdocs_all":
             for k, v in installed.items():
@@ -440,7 +584,7 @@ def download_file(file_id: str, show_progress: bool = True) -> bool:
         return False
 
     filename = os.path.basename(url.split("?")[0])
-    filepath = os.path.join(ZIM_FOLDER, filename)
+    filepath = os.path.join(get_zim_source_folder(), filename)
 
     print(f"\nDownloading: {file_info['title']}")
     print(f"Size:        {file_info['size']}")
@@ -494,7 +638,7 @@ def download_file(file_id: str, show_progress: bool = True) -> bool:
         # Record in manifest
         manifest = load_manifest()
         manifest["installed"][file_id] = {
-            "path": filepath,
+            "path": os.path.abspath(filepath),
             "title": file_info["title"],
             "size": file_info["size"],
             "installed_at": Path(filepath).stat().st_mtime,
@@ -540,18 +684,20 @@ def uninstall_file(file_id: str) -> bool:
         return False
 
 
-def get_preset_installation_status(preset_id: str) -> Dict:
-    """Return installation status for every file in a preset."""
-    if preset_id not in PRESET_FILES:
+def get_category_installation_status(category_id: str) -> Dict:
+    """Return installation status for every file in a category."""
+    requested_category = category_id
+    category_id = normalize_category_id(category_id)
+    if not category_id:
         return {
-            "error": f"Unknown preset: '{preset_id}'. "
-            f"Valid options: {', '.join(PRESET_FILES)}"
+            "error": f"Unknown category: '{requested_category}'. "
+            f"Valid options: {', '.join(CATEGORY_FILES)}"
         }
 
     installed_map = list_installed_files()
     files_status = []
 
-    for file_info in PRESET_FILES[preset_id]:
+    for file_info in CATEGORY_FILES[category_id]:
         file_id = file_info["id"]
         installed = is_file_installed(file_id)
 
@@ -571,7 +717,7 @@ def get_preset_installation_status(preset_id: str) -> Dict:
 
         files_status.append(entry)
 
-    return {"preset": preset_id, "files": files_status}
+    return {"category": category_id, "files": files_status}
 
 
 def list_devdocs_catalog() -> List[Dict]:

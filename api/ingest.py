@@ -1,10 +1,10 @@
 from tqdm import tqdm
 
-from src.bm25_index import BM25Index
-from src.chunker import chunk_text
-from src.embedder import Embedder
-from src.utils import clean_text, iterate_articles
-from src.vectordb import VectorDB
+from api.bm25_index import BM25Index
+from api.chunker import chunk_text
+from api.embedder import Embedder
+from api.utils import clean_text, iterate_articles
+from api.vectordb import VectorDB
 
 
 def run_ingestion(zim_path: str, output_name="zim_db"):
@@ -13,6 +13,7 @@ def run_ingestion(zim_path: str, output_name="zim_db"):
 
     batch_texts = []
     batch_chunks = []
+    batch_metadata = []
 
     for article in tqdm(iterate_articles(zim_path)):
         clean = clean_text(article["text"])
@@ -23,6 +24,14 @@ def run_ingestion(zim_path: str, output_name="zim_db"):
 
         batch_chunks.extend(chunks)
         batch_texts.extend(chunks)
+        batch_metadata.extend(
+            {
+                "zim_title": article.get("zim_title"),
+                "zim_path": article.get("zim_path") or zim_path,
+                "article_title": article.get("title"),
+            }
+            for _ in chunks
+        )
 
         if len(batch_texts) >= 100:
             embeddings = embedder.encode(batch_texts)
@@ -30,17 +39,18 @@ def run_ingestion(zim_path: str, output_name="zim_db"):
             if db is None:
                 db = VectorDB(dim=len(embeddings[0]))
 
-            db.add(embeddings, batch_chunks)
+            db.add(embeddings, batch_chunks, batch_metadata)
 
             batch_texts = []
             batch_chunks = []
+            batch_metadata = []
 
     # Process remaining batch
     if batch_texts:
         embeddings = embedder.encode(batch_texts)
         if db is None:
             db = VectorDB(dim=len(embeddings[0]))
-        db.add(embeddings, batch_chunks)
+        db.add(embeddings, batch_chunks, batch_metadata)
 
     if db is None:
         raise ValueError("No valid content found in ZIM file")

@@ -2,7 +2,7 @@
 Manual smoke script for OpenAI-compatible API endpoints.
 
 Run this after:
-1. Starting the server: uvicorn src.main:app --reload
+1. Starting the server: python -m tensor_serve start --reload
 2. Configuring an AI endpoint: curl -X POST http://localhost:8000/config/set-ai-endpoint ...
 3. Loading a database: curl http://localhost:8000/load?name=...
 
@@ -52,7 +52,7 @@ def check_health():
             print_success("Server is running")
             print(f"  - DB loaded: {data.get('db_loaded')}")
             print(f"  - AI configured: {data.get('ai_configured')}")
-            print(f"  - Active preset: {data.get('active_preset')}")
+            print(f"  - Active collection: {data.get('active_collection')}")
             return True
         print_error(f"Health check failed: {resp.status_code}")
         return False
@@ -231,7 +231,7 @@ def main():
     results["health"] = check_health()
     if not results["health"]:
         print_error("\nServer is not reachable. Start the server with:")
-        print("  uvicorn src.main:app --reload")
+        print("  python -m tensor_serve start --reload")
         return
 
     results["v1_models"] = check_v1_models()

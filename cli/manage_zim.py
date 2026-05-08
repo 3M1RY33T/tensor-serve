@@ -3,14 +3,14 @@
 Tensor Serve ZIM File Manager CLI
 
 Usage:
-    python -m src.manage_zim list                    # List available preset files
-    python -m src.manage_zim status                  # Show installation status
-    python -m src.manage_zim status <preset>         # Status for specific preset
-    python -m src.manage_zim install <file_id>       # Install a file by ID
-    python -m src.manage_zim uninstall <file_id>     # Uninstall a file
-    python -m src.manage_zim install-preset <preset> # Interactive install for preset
-    python -m src.manage_zim install-devdocs         # Install devdocs from full catalog
-    python -m src.manage_zim clean                   # Remove working files (vector DB, conversations)
+    python -m tensor_serve zim list                    # List available category files
+    python -m tensor_serve zim status                  # Show installation status
+    python -m tensor_serve zim status <category>       # Status for a category
+    python -m tensor_serve zim install <file_id>       # Install a file by ID
+    python -m tensor_serve zim uninstall <file_id>     # Uninstall a file
+    python -m tensor_serve zim install-category <category>  # Interactive category install
+    python -m tensor_serve zim install-devdocs         # Install devdocs from full catalog
+    python -m tensor_serve zim clean                   # Remove generated index files and caches
 """
 
 import argparse
@@ -21,11 +21,11 @@ import sys
 
 import questionary
 
-from src.zim_downloader import (
+from api.zim_downloader import (
     bytes_to_human,
     download_file,
-    get_installed_files_for_preset,
-    get_preset_installation_status,
+    get_category_installation_status,
+    get_zim_source_folder,
     is_file_installed,
     list_available_files,
     list_devdocs_catalog,
@@ -35,15 +35,15 @@ from src.zim_downloader import (
 
 
 def print_available():
-    """Print available preset files grouped by preset."""
+    """Print available files grouped by category."""
     available = list_available_files()
 
     print("\n" + "=" * 80)
     print("AVAILABLE ZIM FILES FOR TENSOR SERVE".center(80))
     print("=" * 80)
 
-    for preset_id, files in available.items():
-        print(f"\n📚 {preset_id.upper()}")
+    for category_id, files in available.items():
+        print(f"\n📚 {category_id}")
         print("-" * 80)
         for file_info in files:
             print(f"  ID:          {file_info['id']}")
@@ -53,16 +53,16 @@ def print_available():
             print()
 
 
-def print_status(preset_id=None):
+def print_status(category_id=None):
     """Print installation status."""
-    if preset_id:
-        status = get_preset_installation_status(preset_id)
+    if category_id:
+        status = get_category_installation_status(category_id)
         if "error" in status:
             print(f"✗ {status['error']}")
             return
 
         print(f"\n{'=' * 80}")
-        print(f"Installation Status: {preset_id.upper()}".center(80))
+        print(f"Installation Status: {category_id}".center(80))
         print("=" * 80)
 
         for file in status["files"]:
@@ -83,7 +83,7 @@ def print_status(preset_id=None):
 
         if not installed:
             print(
-                "\nNo files installed yet. Use 'python -m src.manage_zim list' to see available files."
+                "\nNo files installed yet. Use 'python -m tensor_serve zim list' to see available files."
             )
             return
 
@@ -93,22 +93,22 @@ def print_status(preset_id=None):
             print(f"  Path: {info['path']}")
 
 
-def interactive_install_preset(preset_id):
-    """Interactively install files for a preset."""
-    status = get_preset_installation_status(preset_id)
+def interactive_install_category(category_id):
+    """Interactively install files for a curated category."""
+    status = get_category_installation_status(category_id)
 
     if "error" in status:
         print(f"✗ {status['error']}")
         return
 
     print(f"\n{'=' * 80}")
-    print(f"INSTALL {preset_id.upper()} PRESET".center(80))
+    print(f"INSTALL {category_id} CATEGORY".center(80))
     print("=" * 80)
 
     uninstalled = [f for f in status["files"] if not f["installed"]]
 
     if not uninstalled:
-        print(f"\n✓ All files for '{preset_id}' are already installed!")
+        print(f"\n✓ All files for '{category_id}' are already installed!")
         return
 
     choices = [
@@ -205,7 +205,7 @@ def interactive_install_devdocs():
 
 
 def clean_working_files():
-    """Remove generated working files, preserving presets, config, and ZIM files."""
+    """Remove generated working files, preserving collections, config, and ZIM files."""
     print("\n" + "=" * 80)
     print("CLEAN WORKING FILES".center(80))
     print("=" * 80)
@@ -213,11 +213,10 @@ def clean_working_files():
     print("  • Vector DB index files (*.index)")
     print("  • Vector DB text stores (*.pkl)")
     print("  • BM25 keyword index files (*.bm25)")
-    print("  • Conversation history (conversations.db)")
     print("  • Python bytecode cache (__pycache__/)")
     print("\nThis will NOT remove:")
-    print("  • presets.json, config.json, zim_manifest.json")
-    print("  • ZIM files in zim_files/\n")
+    print("  • collections.json, config.json, zim_manifest.json")
+    print(f"  • ZIM files in {get_zim_source_folder()}/\n")
 
     confirm = questionary.confirm("Proceed with cleanup?").ask()
     if not confirm:
@@ -230,10 +229,6 @@ def clean_working_files():
         for path in sorted(glob.glob(pattern)):
             os.remove(path)
             removed.append(path)
-
-    if os.path.exists("conversations.db"):
-        os.remove("conversations.db")
-        removed.append("conversations.db")
 
     if os.path.isdir("__pycache__"):
         shutil.rmtree("__pycache__")
@@ -257,14 +252,14 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # List command
-    subparsers.add_parser("list", help="List available preset ZIM files")
+    subparsers.add_parser("list", help="List available category ZIM files")
 
     # Status command
     status_parser = subparsers.add_parser("status", help="Show installation status")
     status_parser.add_argument(
-        "preset",
+        "category",
         nargs="?",
-        help="Specific preset to check (research, learn, literature, coding)",
+        help="Specific category to check (Research, Learning, Literature, Coding)",
     )
 
     # Install command
@@ -275,13 +270,13 @@ def main():
     uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall a ZIM file")
     uninstall_parser.add_argument("file_id", help="File ID to uninstall")
 
-    # Install preset command
-    install_preset_parser = subparsers.add_parser(
-        "install-preset", help="Interactively install files for a preset"
+    # Install category command
+    install_category_parser = subparsers.add_parser(
+        "install-category", help="Interactively install files for a category"
     )
-    install_preset_parser.add_argument(
-        "preset",
-        help="Preset ID (research, learn, literature, coding)",
+    install_category_parser.add_argument(
+        "category",
+        help="Category ID (Research, Learning, Literature, Coding)",
     )
 
     # Install devdocs command
@@ -293,7 +288,7 @@ def main():
     # Clean command
     subparsers.add_parser(
         "clean",
-        help="Remove working files (*.index, *.pkl, conversations.db, __pycache__/)",
+        help="Remove working files (*.index, *.pkl, *.bm25, __pycache__/)",
     )
 
     args = parser.parse_args()
@@ -306,7 +301,7 @@ def main():
         print_available()
 
     elif args.command == "status":
-        print_status(args.preset)
+        print_status(args.category)
 
     elif args.command == "install":
         if download_file(args.file_id):
@@ -320,8 +315,8 @@ def main():
         else:
             sys.exit(1)
 
-    elif args.command == "install-preset":
-        interactive_install_preset(args.preset)
+    elif args.command == "install-category":
+        interactive_install_category(args.category)
 
     elif args.command == "install-devdocs":
         interactive_install_devdocs()

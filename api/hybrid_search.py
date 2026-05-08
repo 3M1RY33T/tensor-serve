@@ -1,5 +1,5 @@
 """
-Reciprocal Rank Fusion (RRF) and hybrid search combining FAISS + BM25.
+Reciprocal Rank Fusion (RRF) and hybrid search combining FAISS + BM25 + Web Search.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -39,9 +39,10 @@ def hybrid_search(
     rrf_k: int = 60,
     relevance_threshold: float = 0.0,
     search_mode: str = "hybrid",
+    web_results: Optional[List] = None,
 ) -> List[str]:
     """
-    Hybrid retrieval: FAISS semantic search + BM25 keyword search via RRF.
+    Hybrid retrieval: FAISS semantic search + BM25 keyword search + optional Web Search via RRF.
 
     Both indexes retrieve candidate_k results (default: top_k × 3) so RRF has
     enough candidates to re-rank. The final list is trimmed to top_k.
@@ -49,7 +50,9 @@ def hybrid_search(
     Gracefully degrades:
     - No BM25 index → pure semantic search
     - No FAISS index → pure keyword search
-    - Neither        → empty list
+    - Neither        → web search only (if available)
+    - No web search  → local search only
+    - search_mode=None → no search, return empty list
 
     Args:
         query:                Raw text query (tokenised for BM25).
@@ -60,11 +63,16 @@ def hybrid_search(
         candidate_k:          Candidates fetched from each index (default top_k × 3).
         rrf_k:                RRF constant (default 60).
         relevance_threshold:  Minimum RRF score to include chunk (0.0 = no filtering).
-        search_mode:          'hybrid' (both), 'faiss' (semantic only), or 'bm25' (keyword only).
+        search_mode:          'hybrid', 'faiss', 'bm25', 'web', 'hybrid_web', or None (disabled).
+        web_results:          Optional list of web search results to merge.
 
     Returns:
         List of up to top_k text chunks, best match first.
     """
+    # If search is disabled, return empty list
+    if search_mode is None:
+        return []
+
     if candidate_k is None:
         candidate_k = top_k * 3
 
@@ -72,7 +80,7 @@ def hybrid_search(
     texts: List[str] = []
 
     # --- FAISS semantic search (if mode allows) ---
-    if search_mode in ("hybrid", "faiss") and vectordb is not None:
+    if search_mode in ("hybrid", "faiss", "hybrid_web") and vectordb is not None:
         faiss_indices = vectordb.search_indices(query_embedding, candidate_k)
         if faiss_indices:
             ranked_lists.append(faiss_indices)
@@ -85,6 +93,22 @@ def hybrid_search(
             ranked_lists.append(bm25_indices)
             if not texts:
                 texts = bm25_index.texts
+
+    # --- Web search results (optional, always in web/hybrid_web mode if available) ---
+    if web_results and search_mode in ("web", "hybrid_web"):
+        # Convert web results to text chunks and add to ranking
+        web_texts = [result.to_chunk_text() for result in web_results]
+        web_indices = list(range(len(texts), len(texts) + len(web_texts)))
+        if web_indices:
+            ranked_lists.append(web_indices)
+            texts.extend(web_texts)
+    elif web_results and search_mode not in ("web",):
+        # For other modes, include web results if available
+        web_texts = [result.to_chunk_text() for result in web_results]
+        web_indices = list(range(len(texts), len(texts) + len(web_texts)))
+        if web_indices:
+            ranked_lists.append(web_indices)
+            texts.extend(web_texts)
 
     if not ranked_lists or not texts:
         return []

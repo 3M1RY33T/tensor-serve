@@ -1,5 +1,5 @@
-from src.hybrid_search import hybrid_search, reciprocal_rank_fusion
-from src.reranker import get_reranker, rerank_results
+from api.hybrid_search import hybrid_search, reciprocal_rank_fusion
+from api.reranker import get_reranker, rerank_results
 
 
 class FakeVDB:

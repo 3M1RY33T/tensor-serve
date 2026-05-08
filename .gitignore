@@ -4,9 +4,13 @@
 *.index
 *.pkl
 *.bm25
-conversations.db
 .venv/
+build/
+dist/
+*.egg-info/
 zim_manifest.json
 presets.json
 config.json
+.tensor_config.key
 .DS_Store
+collections.json

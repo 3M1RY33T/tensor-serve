@@ -1,0 +1,29 @@
+include LICENSE
+include README.md
+include RELEASE.md
+include requirements.txt
+include pyproject.toml
+
+recursive-include api *.py README.md
+recursive-include cli *.py README.md
+recursive-include tensor_serve *.py
+recursive-include test *.py README.md
+
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.index
+global-exclude *.pkl
+global-exclude *.bm25
+global-exclude config.json
+global-exclude collections.json
+global-exclude zim_manifest.json
+global-exclude presets.json
+global-exclude .tensor_config.key
+
+prune .git
+prune .pytest_cache
+prune .venv
+prune build
+prune dist
+prune zim_files
