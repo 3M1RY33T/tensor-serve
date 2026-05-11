@@ -261,6 +261,88 @@ curl -X PATCH http://localhost:8000/config/search-modes \
     -d '{"keyword_search_mode": "off", "semantic_search_mode": "off"}'
   ```
 
+### Search Complexity Profiles
+
+Tensor Serve supports pre-configured search profiles for different deployment scenarios. Switch profiles to optimize search algorithms, backends, and parameters all at once.
+
+**Get available profiles**:
+```bash
+curl http://localhost:8000/config/search-profiles
+```
+
+Response includes:
+- Current active profile (`lightweight`, `balanced`, `production`, or `manual`)
+- Profile definitions with configurations
+- Available keyword/semantic backends
+- Supported reranker models
+
+**Switch to a preset profile**:
+```bash
+# Lightweight (local/embedded deployments)
+curl -X POST http://localhost:8000/config/search-profiles/lightweight
+
+# Balanced (default, general purpose)
+curl -X POST http://localhost:8000/config/search-profiles/balanced
+
+# Production (enterprise servers, large-scale)
+curl -X POST http://localhost:8000/config/search-profiles/production
+```
+
+**Override specific settings within a profile**:
+```bash
+curl -X POST http://localhost:8000/config/search-profiles/balanced \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reranker_model": "balanced",
+    "query_expansion_enabled": true,
+    "query_expansion_type": "prf"
+  }'
+```
+
+**Manual profile (fine-tuned configuration)**:
+```bash
+curl -X POST http://localhost:8000/config/search-profiles/manual \
+  -H "Content-Type: application/json" \
+  -d '{
+    "keyword_backend": "bm25_plus",
+    "semantic_backend": "faiss_ivf",
+    "max_search_candidates": 200,
+    "query_expansion_enabled": true,
+    "query_expansion_type": "prf",
+    "reranker_enabled": true,
+    "reranker_model": "balanced"
+  }'
+```
+
+**Profile Details:**
+
+| Setting | Lightweight | Balanced | Production |
+|---------|-------------|----------|------------|
+| `keyword_backend` | bm25_okapi | bm25_okapi | bm25_plus |
+| `semantic_backend` | faiss_flat | faiss_flat | faiss_ivf |
+| `query_expansion_enabled` | false | false | true |
+| `query_expansion_type` | none | none | prf |
+| `max_search_candidates` | 50 | 150 | 300 |
+| `reranker_enabled` | false | true | true |
+| `reranker_model` | — | lightweight | balanced |
+
+**Keyword Backends:**
+- `bm25_okapi` - Standard BM25 ranking (fast, reliable baseline)
+- `bm25_plus` - Enhanced BM25+ with better term saturation (better precision on large collections)
+
+**Semantic Backends:**
+- `faiss_flat` - Exact L2 distance search with O(n) complexity (good for <500K vectors)
+- `faiss_ivf` - Approximate nearest neighbor search with O(n/k) complexity (optimal for 500K+ vectors, 50% faster on large collections)
+
+**Query Expansion:**
+- `none` - No expansion (fastest, baseline)
+- `prf` - Pseudo-relevance feedback (expand query with top-1 result terms, improves recall 5-10%)
+- `entity` - Extract and weight named entities in query
+
+**Reranker Models:**
+- `lightweight` - 22M params (~50ms per batch)
+- `balanced` - 71M params (~100ms per batch, recommended for production)
+
 #### Model auto-detection
 
 `ai_model` does not need to be set manually. The server can discover available models by querying the endpoint directly — it tries the OpenAI-compatible `GET /v1/models` route first (LM Studio, Ollama's OpenAI-compatible API, vLLM, LocalAI, LiteLLM, OpenAI-compatible cloud APIs, etc.), then falls back to Ollama's `GET /api/tags`.

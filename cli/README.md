@@ -36,12 +36,19 @@ Configure the local AI endpoint, ZIM file source, search behavior, and web searc
 ```bash
 tensor-serve config show
 tensor-serve config set-ai-endpoint --endpoint http://localhost:11434 --model gpt-4o-mini --api-key "MY_API_KEY"
+
 tensor-serve config set-zim-source ~/data/zim
 tensor-serve config clear-zim-source
+
 tensor-serve config set-search-modes --keyword-mode auto --semantic-mode on
+tensor-serve config search-profiles
+tensor-serve config set-search-profile lightweight
+tensor-serve config set-search-profile manual --keyword-backend bm25_plus --semantic-backend faiss_ivf --query-expansion prf --enable-reranker
+
 tensor-serve config set-context-size 3
 tensor-serve config enable-web-search --provider duckduckgo
 tensor-serve config disable-web-search
+
 tensor-serve config reset
 tensor-serve config list-models --endpoint http://localhost:11434
 tensor-serve config detect-local-ai
@@ -54,6 +61,8 @@ Available configuration commands:
 - `set-zim-source` — Configure a custom ZIM source folder
 - `clear-zim-source` — Reset ZIM storage back to the default `zim_files/` folder
 - `set-search-modes` — Update keyword and semantic search mode behavior
+- `search-profiles` — List available search profiles, backend options, and reranker models
+- `set-search-profile` — Apply `lightweight`, `balanced`, `production`, or `manual` search complexity settings with optional overrides
 - `set-context-size` — Change how many context documents are used
 - `enable-web-search` / `disable-web-search` — Toggle web search for time-sensitive queries
 - `reset` — Reset `config.json` to default settings; add `--server http://localhost:8000` to reset a running server through `POST /config/reset`
@@ -61,6 +70,13 @@ Available configuration commands:
 - `detect-local-ai` — Discover local runtimes such as Ollama, LM Studio, or LocalAI
 
 API keys and extra upstream headers are encrypted at rest before they are written to `config.json`. Tensor Serve creates `.tensor_config.key` by default; use `TENSOR_CONFIG_KEY` or `TENSOR_CONFIG_KEY_FILE` when you want to manage the encryption key outside the project folder.
+
+Search profile commands update local `config.json` by default. Add `--server http://localhost:8000` to call the running server's `/config/search-profiles` endpoints instead:
+
+```bash
+tensor-serve config search-profiles --server http://localhost:8000
+tensor-serve config set-search-profile balanced --query-expansion prf --server http://localhost:8000
+```
 
 ## Health CLI (`tensor-serve health`)
 

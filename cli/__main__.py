@@ -91,7 +91,7 @@ def _human_file_size(path):
     return bytes_to_human(Path(path).stat().st_size)
 
 
-def _server_request(method, server, path, params=None, timeout=60):
+def _server_request(method, server, path, params=None, json_body=None, timeout=60):
     import requests
 
     base = server.rstrip("/")
@@ -100,6 +100,7 @@ def _server_request(method, server, path, params=None, timeout=60):
             method,
             f"{base}{path}",
             params=params,
+            json=json_body,
             timeout=timeout,
         )
     except requests.RequestException as exc:
@@ -118,8 +119,27 @@ def _server_get(server, path, params=None, timeout=60):
     return _server_request("GET", server, path, params=params, timeout=timeout)
 
 
-def _server_post(server, path, params=None, timeout=60):
-    return _server_request("POST", server, path, params=params, timeout=timeout)
+def _server_post(server, path, params=None, json_body=None, timeout=60):
+    return _server_request(
+        "POST",
+        server,
+        path,
+        params=params,
+        json_body=json_body,
+        timeout=timeout,
+    )
+
+
+def _parse_json_object(value, option_name):
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except Exception as exc:
+        raise SystemExit(f"Invalid JSON for {option_name}: {exc}")
+    if not isinstance(parsed, dict):
+        raise SystemExit(f"{option_name} must be a JSON object.")
+    return parsed
 
 
 def health_command(args):
@@ -332,6 +352,132 @@ def config_set_search_modes(args):
     config_show(args)
 
 
+def _search_profile_overrides_from_args(args):
+    overrides = _parse_json_object(args.overrides, "--overrides")
+
+    flag_values = {
+        "keyword_backend": args.keyword_backend,
+        "semantic_backend": args.semantic_backend,
+        "max_search_candidates": args.max_candidates,
+        "reranker_model": args.reranker_model,
+    }
+    if args.max_candidates is not None and args.max_candidates < 1:
+        raise SystemExit("--max-candidates must be a positive integer.")
+
+    for key, value in flag_values.items():
+        if value is not None:
+            overrides[key] = value
+
+    if args.query_expansion_type is not None:
+        overrides["query_expansion_type"] = args.query_expansion_type
+        if args.query_expansion_type == "none":
+            overrides["query_expansion_enabled"] = False
+        elif "query_expansion_enabled" not in overrides:
+            overrides["query_expansion_enabled"] = True
+
+    if args.enable_query_expansion:
+        overrides["query_expansion_enabled"] = True
+    if args.disable_query_expansion:
+        overrides["query_expansion_enabled"] = False
+
+    if args.enable_reranker:
+        overrides["reranker_enabled"] = True
+    if args.disable_reranker:
+        overrides["reranker_enabled"] = False
+
+    return overrides
+
+
+def _local_search_profiles_payload():
+    from api.config import load_config
+    from api.search_backends import KEYWORD_BACKENDS, SEMANTIC_BACKENDS
+    from api.search_profiles import PROFILES, RERANKER_MODELS
+
+    config = load_config()
+    return {
+        "current_profile": config.get("search_profile", "balanced"),
+        "profiles": PROFILES,
+        "available_backends": {
+            "keyword": list(KEYWORD_BACKENDS.keys()),
+            "semantic": list(SEMANTIC_BACKENDS.keys()),
+        },
+        "reranker_models": RERANKER_MODELS,
+    }
+
+
+def config_search_profiles(args):
+    if args.server:
+        result = _server_get(
+            args.server,
+            "/config/search-profiles",
+            timeout=args.timeout,
+        )
+    else:
+        result = _local_search_profiles_payload()
+    _print_json(result)
+
+
+def config_set_search_profile(args):
+    from api.config import load_config, set_config_value
+    from api.search_profiles import (
+        list_profiles,
+        merge_profile_with_overrides,
+        validate_manual_config,
+    )
+
+    overrides = _search_profile_overrides_from_args(args)
+
+    if args.server:
+        json_body = overrides or None
+        result = _server_post(
+            args.server,
+            f"/config/search-profiles/{args.profile}",
+            json_body=json_body,
+            timeout=args.timeout,
+        )
+        _print_json(result)
+        return
+
+    if args.profile not in list_profiles() and args.profile != "manual":
+        available = ", ".join([*list_profiles().keys(), "manual"])
+        raise SystemExit(f"Unknown profile: {args.profile}. Available: {available}")
+
+    if args.profile == "manual":
+        if not overrides:
+            raise SystemExit(
+                "Manual profile requires overrides with at least "
+                "--keyword-backend and --semantic-backend."
+            )
+        if not validate_manual_config(overrides):
+            raise SystemExit("Invalid manual configuration. Check backend names.")
+        config_to_apply = overrides
+    else:
+        config_to_apply = merge_profile_with_overrides(args.profile, overrides)
+
+    for key, value in config_to_apply.items():
+        set_config_value(key, value)
+    set_config_value("search_profile", args.profile)
+
+    config = load_config()
+    _print_json(
+        {
+            "status": "updated",
+            "profile": args.profile,
+            "applied_config": {k: v for k, v in config_to_apply.items()},
+            "full_config": {
+                "search_profile": config.get("search_profile"),
+                "keyword_backend": config.get("keyword_backend"),
+                "semantic_backend": config.get("semantic_backend"),
+                "max_search_candidates": config.get("max_search_candidates"),
+                "query_expansion_enabled": config.get("query_expansion_enabled"),
+                "query_expansion_type": config.get("query_expansion_type"),
+                "reranker_enabled": config.get("reranker_enabled"),
+                "reranker_model": config.get("reranker_model"),
+            },
+        }
+    )
+
+
 def config_set_context_size(args):
     from api.config import set_config_value
 
@@ -416,6 +562,10 @@ def config_command(args):
         config_clear_zim_source(args)
     elif args.config_command == "set-search-modes":
         config_set_search_modes(args)
+    elif args.config_command == "search-profiles":
+        config_search_profiles(args)
+    elif args.config_command == "set-search-profile":
+        config_set_search_profile(args)
     elif args.config_command == "set-context-size":
         config_set_context_size(args)
     elif args.config_command == "enable-web-search":
@@ -809,6 +959,88 @@ def main():
         "--semantic-mode",
         choices=["auto", "on", "off"],
         help="Semantic search mode"
+    )
+
+    search_profiles_parser = config_subparsers.add_parser(
+        "search-profiles",
+        help="List available search profiles and backend options"
+    )
+    search_profiles_parser.add_argument(
+        "--server",
+        help="Read profiles from a running Tensor Serve server instead of local files"
+    )
+    search_profiles_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+
+    set_profile_parser = config_subparsers.add_parser(
+        "set-search-profile",
+        help="Apply a search profile with optional backend/query/reranker overrides"
+    )
+    set_profile_parser.add_argument(
+        "profile",
+        choices=["lightweight", "balanced", "production", "manual"],
+        help="Search profile to apply"
+    )
+    set_profile_parser.add_argument(
+        "--server",
+        help="Apply profile through a running Tensor Serve server instead of local files"
+    )
+    set_profile_parser.add_argument(
+        "--timeout", type=int, default=60, help="HTTP timeout in seconds"
+    )
+    set_profile_parser.add_argument(
+        "--overrides",
+        help="JSON object of raw profile overrides, e.g. '{\"max_search_candidates\": 200}'"
+    )
+    set_profile_parser.add_argument(
+        "--keyword-backend",
+        choices=["bm25_okapi", "bm25_plus"],
+        help="Keyword backend override"
+    )
+    set_profile_parser.add_argument(
+        "--semantic-backend",
+        choices=["faiss_flat", "faiss_ivf"],
+        help="Semantic backend override"
+    )
+    set_profile_parser.add_argument(
+        "--max-candidates",
+        type=int,
+        help="Maximum candidate documents considered before final top-k selection"
+    )
+    set_profile_parser.add_argument(
+        "--query-expansion",
+        "--query-expansion-type",
+        dest="query_expansion_type",
+        choices=["none", "prf", "entity"],
+        help="Query expansion strategy; non-none values enable query expansion"
+    )
+    query_expansion_group = set_profile_parser.add_mutually_exclusive_group()
+    query_expansion_group.add_argument(
+        "--enable-query-expansion",
+        action="store_true",
+        help="Enable query expansion without changing the configured strategy"
+    )
+    query_expansion_group.add_argument(
+        "--disable-query-expansion",
+        action="store_true",
+        help="Disable query expansion"
+    )
+    reranker_group = set_profile_parser.add_mutually_exclusive_group()
+    reranker_group.add_argument(
+        "--enable-reranker",
+        action="store_true",
+        help="Enable reranking"
+    )
+    reranker_group.add_argument(
+        "--disable-reranker",
+        action="store_true",
+        help="Disable reranking"
+    )
+    set_profile_parser.add_argument(
+        "--reranker-model",
+        choices=["lightweight", "balanced"],
+        help="Reranker model variant"
     )
 
     context_parser = config_subparsers.add_parser(

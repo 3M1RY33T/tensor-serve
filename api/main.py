@@ -561,6 +561,95 @@ def update_search_modes(req: dict):
     }
 
 
+@app.get("/config/search-profiles")
+def get_search_profiles():
+    """List available search profiles and their configurations."""
+    from api.search_profiles import PROFILES, RERANKER_MODELS
+    from api.search_backends import KEYWORD_BACKENDS, SEMANTIC_BACKENDS
+    
+    config = load_config()
+    current_profile = config.get("search_profile", "balanced")
+    
+    return {
+        "current_profile": current_profile,
+        "profiles": PROFILES,
+        "available_backends": {
+            "keyword": list(KEYWORD_BACKENDS.keys()),
+            "semantic": list(SEMANTIC_BACKENDS.keys()),
+        },
+        "reranker_models": RERANKER_MODELS,
+    }
+
+
+@app.post("/config/search-profiles/{profile}")
+def set_search_profile(profile: str, overrides: dict = None):
+    """
+    Switch to a predefined search profile or apply manual overrides.
+    
+    Args:
+        profile: Profile name ('lightweight', 'balanced', 'production', or 'manual')
+        overrides: Optional dict to override profile settings
+    
+    Example:
+        POST /config/search-profiles/production
+        POST /config/search-profiles/balanced {"query_expansion_type": "prf"}
+        POST /config/search-profiles/manual {"keyword_backend": "bm25_plus", "semantic_backend": "faiss_ivf"}
+    """
+    from api.search_profiles import get_profile, list_profiles, merge_profile_with_overrides, validate_manual_config
+    
+    if profile not in list_profiles() and profile != "manual":
+        available = list(list_profiles().keys()) + ["manual"]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown profile: {profile}. Available: {available}",
+        )
+    
+    try:
+        if profile == "manual":
+            # Manual mode: validate provided overrides
+            if not overrides:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Manual profile requires overrides with at least 'keyword_backend' and 'semantic_backend'",
+                )
+            if not validate_manual_config(overrides):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid manual configuration. Check backend names.",
+                )
+            config_to_apply = overrides
+        else:
+            # Preset profile with optional overrides
+            config_to_apply = merge_profile_with_overrides(profile, overrides)
+        
+        # Apply configuration
+        for key, value in config_to_apply.items():
+            set_config_value(key, value)
+        
+        # Set profile name
+        set_config_value("search_profile", profile if profile != "manual" else "manual")
+        
+        config = load_config()
+        return {
+            "status": "updated",
+            "profile": profile if profile != "manual" else "manual",
+            "applied_config": {k: v for k, v in config_to_apply.items()},
+            "full_config": {
+                "search_profile": config.get("search_profile"),
+                "keyword_backend": config.get("keyword_backend"),
+                "semantic_backend": config.get("semantic_backend"),
+                "max_search_candidates": config.get("max_search_candidates"),
+                "query_expansion_enabled": config.get("query_expansion_enabled"),
+                "query_expansion_type": config.get("query_expansion_type"),
+                "reranker_enabled": config.get("reranker_enabled"),
+                "reranker_model": config.get("reranker_model"),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.patch("/config")
 def update_config(req: UpdateConfigRequest):
@@ -1142,10 +1231,15 @@ def search(req: SearchRequest):
         reranker_enabled = get_config_value("reranker_enabled")
         if reranker_enabled is None:
             reranker_enabled = False
+        reranker_model = get_config_value("reranker_model") or "lightweight"
         
         # Get search mode customization settings
         keyword_search_mode = get_config_value("keyword_search_mode") or "auto"
         semantic_search_mode = get_config_value("semantic_search_mode") or "auto"
+        
+        # Get query expansion settings
+        query_expansion_enabled = get_config_value("query_expansion_enabled") or False
+        query_expansion_type = get_config_value("query_expansion_type") or "none"
         
         search_mode = QueryAnalyzer.select_search_mode(req.query, keyword_search_mode, semantic_search_mode)
         
@@ -1168,16 +1262,23 @@ def search(req: SearchRequest):
                 web_search_results_count = get_config_value("web_search_results") or 3
                 web_results = web_search_manager.search(req.query, num_results=web_search_results_count)
             
+            # Get configured max_search_candidates (falls back to default)
+            max_candidates = get_config_value("max_search_candidates")
+            if max_candidates is None:
+                max_candidates = req.top_k * 3
+            
             results = hybrid_search(
                 query=req.query,
                 query_embedding=query_embedding,
                 vectordb=app_state.db,
                 bm25_index=app_state.bm25,
                 top_k=req.top_k,
-                candidate_k=max(req.top_k * 3, 10),
+                candidate_k=max(max_candidates, 10),
                 relevance_threshold=relevance_threshold,
                 search_mode=search_mode,
                 web_results=web_results,
+                query_expansion_enabled=query_expansion_enabled,
+                query_expansion_type=query_expansion_type,
             )
             
             # Re-rank results if enabled
@@ -1188,6 +1289,7 @@ def search(req: SearchRequest):
                     documents=results,
                     top_k=req.top_k,
                     reranker_enabled=True,
+                    reranker_model=reranker_model,
                 )
             
             # Cache search results
