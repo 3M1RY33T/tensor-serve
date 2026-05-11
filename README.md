@@ -38,6 +38,72 @@ The query analyzer automatically selects the search strategy:
 
 Query embeddings and search results are cached with an in-memory LRU cache to reduce repeated embedding and retrieval work. If enabled, the optional cross-encoder reranker performs a second-stage pass over retrieved chunks before context is sent to the model.
 
+---
+
+## 2. Search Complexity Profiles
+
+Tensor Serve supports **configurable search complexity tiers** allowing you to optimize for your specific deployment:
+
+| Profile | Search Algorithms | Use Case | Latency | Memory |
+|---------|-------------------|----------|---------|--------|
+| **Lightweight** | BM25 Okapi + FAISS Flat | Local machines, embedded | <20ms | <500MB |
+| **Balanced** (default) | BM25 Okapi + FAISS Flat + Reranking | General purpose servers | 50-100ms | 1-2GB |
+| **Production** | BM25+ + FAISS-IVF + Query Expansion + Advanced Reranking | Enterprise servers, large scale | 200-500ms | 4-8GB |
+| **Manual** | Custom backend selection | Fine-tuned deployments | Varies | Varies |
+
+**[→ Read the full Search Profiles Guide](SEARCH_PROFILES.md)**
+
+### Quick Start: Switching Profiles
+
+**Use a preset profile:**
+```bash
+tensor-serve config set-search-profile lightweight
+tensor-serve config set-search-profile production
+```
+
+**Fine-tune with overrides:**
+```bash
+tensor-serve config set-search-profile balanced \
+  --query-expansion prf \
+  --enable-reranker
+```
+
+**Manual profile (full control):**
+```bash
+tensor-serve config set-search-profile manual \
+  --keyword-backend bm25_plus \
+  --semantic-backend faiss_ivf \
+  --query-expansion prf \
+  --enable-reranker \
+  --reranker-model balanced
+```
+
+REST endpoints remain available for automation and custom integrations, for example
+`POST /config/search-profiles/production`.
+
+### Available Backends
+
+**Keyword Search:**
+- `bm25_okapi` - Standard BM25, fast baseline
+- `bm25_plus` - Enhanced BM25 with better precision
+
+**Semantic Search:**
+- `faiss_flat` - Exact L2 distance search (good for <500K vectors)
+- `faiss_ivf` - Approximate search with clustering (optimal for 500K+ vectors)
+
+### Query Expansion (Optional)
+
+Dynamically expands queries to improve recall:
+- `none` - No expansion (default, fastest)
+- `prf` - Pseudo-relevance feedback (expand with top-1 result terms)
+- `entity` - Entity extraction and weighting
+
+### Reranker Models
+
+Fine-tune quality vs. latency trade-off:
+- `lightweight` - 22M params, ~50ms per batch (default)
+- `balanced` - 71M params, ~100ms per batch (recommended for production)
+
 Detailed information about the RAG proxy implementation can be found [here](api/README.md).
 
 ---

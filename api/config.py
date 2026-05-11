@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
     "relevance_threshold": 0.05,
     "query_analysis_enabled": True,
     "reranker_enabled": False,
+    "reranker_model": "lightweight",  # lightweight | balanced | production
     "web_search_enabled": False,
     "web_search_provider": "duckduckgo",
     "web_search_api_key": None,
@@ -35,6 +36,13 @@ DEFAULT_CONFIG = {
     "web_search_results": 3,
     "keyword_search_mode": "auto",     # auto | web | zim | off
     "semantic_search_mode": "auto",    # auto | on | off
+    # Search profile and backend configuration
+    "search_profile": "balanced",  # balanced | lightweight | production | manual
+    "keyword_backend": "bm25_okapi",  # bm25_okapi | bm25_plus
+    "semantic_backend": "faiss_flat",  # faiss_flat | faiss_ivf
+    "max_search_candidates": None,  # None = use profile default
+    "query_expansion_enabled": False,
+    "query_expansion_type": "none",  # none | prf | entity
 }
 
 

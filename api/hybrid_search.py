@@ -1,8 +1,11 @@
 """
 Reciprocal Rank Fusion (RRF) and hybrid search combining FAISS + BM25 + Web Search.
+Supports pluggable backends and query expansion strategies.
 """
 
 from typing import Dict, List, Optional, Tuple
+
+from api.query_expansion import get_expander
 
 
 def reciprocal_rank_fusion(
@@ -40,6 +43,8 @@ def hybrid_search(
     relevance_threshold: float = 0.0,
     search_mode: str = "hybrid",
     web_results: Optional[List] = None,
+    query_expansion_enabled: bool = False,
+    query_expansion_type: str = "none",
 ) -> List[str]:
     """
     Hybrid retrieval: FAISS semantic search + BM25 keyword search + optional Web Search via RRF.
@@ -55,16 +60,18 @@ def hybrid_search(
     - search_mode=None → no search, return empty list
 
     Args:
-        query:                Raw text query (tokenised for BM25).
-        query_embedding:      Pre-computed embedding vector (used for FAISS).
-        vectordb:             VectorDB instance, or None.
-        bm25_index:           BM25Index instance, or None.
-        top_k:                Number of final results to return.
-        candidate_k:          Candidates fetched from each index (default top_k × 3).
-        rrf_k:                RRF constant (default 60).
-        relevance_threshold:  Minimum RRF score to include chunk (0.0 = no filtering).
-        search_mode:          'hybrid', 'faiss', 'bm25', 'web', 'hybrid_web', or None (disabled).
-        web_results:          Optional list of web search results to merge.
+        query:                    Raw text query (tokenised for BM25).
+        query_embedding:          Pre-computed embedding vector (used for FAISS).
+        vectordb:                 VectorDB instance, or None.
+        bm25_index:               BM25Index instance, or None.
+        top_k:                    Number of final results to return.
+        candidate_k:              Candidates fetched from each index (default top_k × 3).
+        rrf_k:                    RRF constant (default 60).
+        relevance_threshold:      Minimum RRF score to include chunk (0.0 = no filtering).
+        search_mode:              'hybrid', 'faiss', 'bm25', 'web', 'hybrid_web', or None (disabled).
+        web_results:              Optional list of web search results to merge.
+        query_expansion_enabled:  Whether to expand query before retrieval.
+        query_expansion_type:     'none', 'prf', or 'entity' expansion strategy.
 
     Returns:
         List of up to top_k text chunks, best match first.
@@ -75,6 +82,12 @@ def hybrid_search(
 
     if candidate_k is None:
         candidate_k = top_k * 3
+
+    # --- Optional query expansion ---
+    expanded_query = query
+    if query_expansion_enabled and query_expansion_type != "none":
+        expander = get_expander(query_expansion_type)
+        expanded_query = expander.expand(query)
 
     ranked_lists: List[List[int]] = []
     texts: List[str] = []
@@ -88,7 +101,7 @@ def hybrid_search(
 
     # --- BM25 keyword search (if mode allows) ---
     if search_mode in ("hybrid", "bm25") and bm25_index is not None:
-        bm25_indices = bm25_index.search_indices(query, candidate_k)
+        bm25_indices = bm25_index.search_indices(expanded_query, candidate_k)
         if bm25_indices:
             ranked_lists.append(bm25_indices)
             if not texts:

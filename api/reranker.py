@@ -1,14 +1,23 @@
 """
 Lightweight re-ranker using cross-encoder for second-stage filtering.
 Re-ranks hybrid search results to ensure highest quality chunks are prioritized.
+Supports multiple model variants for different deployment scenarios.
 """
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     from sentence_transformers import CrossEncoder
 except ImportError:
     CrossEncoder = None
+
+
+# Supported reranker models by complexity level
+RERANKER_MODELS = {
+    "lightweight": "ms-marco-MiniLM-L-6-v2",  # 22M params, ~50ms per batch
+    "balanced": "ms-marco-MiniLM-L-12-v2",  # 71M params, ~100ms per batch
+    "production": "ms-marco-MiniLM-L-12-v2",  # Use balanced for production (best tradeoff)
+}
 
 
 class CrossEncoderReranker:
@@ -84,30 +93,43 @@ class CrossEncoderReranker:
 
 
 # Global reranker instance (lazy-loaded on first use)
-_reranker_instance = None
+_reranker_instance: Optional[CrossEncoderReranker] = None
+_current_model: Optional[str] = None
 
 
-def get_reranker(enabled: bool = True) -> Optional[CrossEncoderReranker]:
+def get_reranker(
+    enabled: bool = True, model_variant: str = "lightweight"
+) -> Optional[CrossEncoderReranker]:
     """
     Get or initialize the global reranker instance.
 
     Args:
         enabled: Whether to initialize reranker (if available)
+        model_variant: 'lightweight', 'balanced', or specific model name
 
     Returns:
         Reranker instance or None if disabled or unavailable.
     """
-    global _reranker_instance
+    global _reranker_instance, _current_model
 
     if not enabled:
         return None
 
-    if _reranker_instance is None:
-        try:
-            _reranker_instance = CrossEncoderReranker()
-        except Exception as e:
-            print(f"Warning: Could not initialize reranker: {e}")
-            _reranker_instance = None
+    # Resolve model name
+    model_name = RERANKER_MODELS.get(model_variant, model_variant)
+
+    # If instance already loaded and model matches, return it
+    if _reranker_instance is not None and _current_model == model_name:
+        return _reranker_instance
+
+    # Otherwise, create new instance with requested model
+    try:
+        _reranker_instance = CrossEncoderReranker(model_name)
+        _current_model = model_name
+    except Exception as e:
+        print(f"Warning: Could not initialize reranker with model {model_name}: {e}")
+        _reranker_instance = None
+        _current_model = None
 
     return _reranker_instance
 
@@ -117,6 +139,7 @@ def rerank_results(
     documents: List[str],
     top_k: Optional[int] = None,
     reranker_enabled: bool = True,
+    reranker_model: str = "lightweight",
 ) -> List[str]:
     """
     Convenience function to rerank documents.
@@ -126,6 +149,7 @@ def rerank_results(
         documents: List of document chunks
         top_k: Return only top_k results
         reranker_enabled: Whether to use reranker
+        reranker_model: Model variant ('lightweight', 'balanced', or model name)
 
     Returns:
         Reranked list of documents (or original if reranker unavailable)
@@ -133,7 +157,7 @@ def rerank_results(
     if not reranker_enabled or not documents:
         return documents
 
-    reranker = get_reranker(enabled=True)
+    reranker = get_reranker(enabled=True, model_variant=reranker_model)
     if reranker is None or not reranker.is_available():
         return documents
 
