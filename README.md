@@ -51,8 +51,6 @@ Tensor Serve supports **configurable search complexity tiers** allowing you to o
 | **Production** | BM25+ + FAISS-IVF + Query Expansion + Advanced Reranking | Enterprise servers, large scale | 200-500ms | 4-8GB |
 | **Manual** | Custom backend selection | Fine-tuned deployments | Varies | Varies |
 
-**[→ Read the full Search Profiles Guide](SEARCH_PROFILES.md)**
-
 ### Quick Start: Switching Profiles
 
 **Use a preset profile:**
