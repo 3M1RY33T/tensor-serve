@@ -13,6 +13,18 @@ import numpy as np
 
 from api.search_backends.base import SemanticSearchBackend
 
+# FAISS wants roughly this many training points per centroid before its k-means
+# is meaningful; below it, the index is fitted to noise.
+_POINTS_PER_CENTROID = 39
+
+# Vectors buffered before training. Training on the first 100-chunk ingest batch
+# fitted centroids to whichever articles happened to be read first.
+_MIN_TRAINING_VECTORS = 4096
+
+# Cells probed per query. FAISS defaults to 1, which reads a single cell of the
+# index and drops recall for no measurable latency saving.
+DEFAULT_NPROBE = 8
+
 
 class FAISSIVFBackend(SemanticSearchBackend):
     """
@@ -21,57 +33,103 @@ class FAISSIVFBackend(SemanticSearchBackend):
     Ideal for large collections (500K+ vectors) on servers.
     """
 
-    def __init__(self, dim: int = 384, n_clusters: int = None):
+    def __init__(self, dim: int = 384, n_clusters: int = None, nprobe: int = DEFAULT_NPROBE):
         self.dim = dim
-        self.n_clusters = n_clusters or max(1, int(np.sqrt(100000)))  # Auto-tune
+        self.n_clusters = n_clusters  # None = derive from the corpus at training time
+        self.nprobe = nprobe
         self.quantizer = faiss.IndexFlatL2(dim)
-        self.index = faiss.IndexIVFFlat(self.quantizer, dim, self.n_clusters)
+        self.index = None
         self._texts: List[str] = []
         self._metadata: List[dict] = []
         self._is_trained = False
+        self._pending: List[np.ndarray] = []
+
+    # ---- training -------------------------------------------------------
+
+    def _clusters_for(self, n_vectors: int) -> int:
+        """
+        Cluster count sized to the corpus actually ingested.
+
+        Previously hardcoded to sqrt(100000) = 316 regardless of corpus size, so
+        a small collection was split into more cells than it had vectors to fill.
+        """
+        if self.n_clusters:
+            return max(1, min(int(self.n_clusters), max(1, n_vectors)))
+        by_size = int(np.sqrt(max(1, n_vectors)))
+        by_training = max(1, n_vectors // _POINTS_PER_CENTROID)
+        return max(1, min(by_size, by_training))
+
+    def _train_and_flush(self) -> None:
+        """Train on everything buffered so far, then add it all."""
+        if not self._pending:
+            return
+
+        vectors = np.vstack(self._pending)
+        self._pending = []
+
+        if not self._is_trained:
+            self.n_clusters = self._clusters_for(len(vectors))
+            self.index = faiss.IndexIVFFlat(self.quantizer, self.dim, self.n_clusters)
+            self.index.train(vectors)
+            self.index.nprobe = self.nprobe
+            self._is_trained = True
+
+        self.index.add(vectors)
+
+    def _flush(self) -> None:
+        """Ensure every buffered vector has reached the index."""
+        if self._pending:
+            self._train_and_flush()
+
+    # ---- writes ---------------------------------------------------------
 
     def add(
         self, embeddings: List[List[float]], chunks: List[str], metadata: List = None
     ) -> None:
         """Add embeddings and chunks to index."""
-        embeddings_array = np.array(embeddings).astype("float32")
+        embeddings_array = np.asarray(embeddings, dtype="float32")
+        if embeddings_array.ndim == 1:
+            embeddings_array = embeddings_array.reshape(1, -1)
 
-        # Train index on first batch if not trained
-        if not self._is_trained:
-            self.index.train(embeddings_array)
-            self._is_trained = True
-
-        self.index.add(embeddings_array)
         self._texts.extend(chunks)
         if metadata is None:
             metadata = [{} for _ in chunks]
         self._metadata.extend(metadata)
 
+        if self._is_trained:
+            self.index.add(embeddings_array)
+            return
+
+        # Buffer until there is enough material to fit centroids on.
+        self._pending.append(embeddings_array)
+        if sum(len(p) for p in self._pending) >= _MIN_TRAINING_VECTORS:
+            self._train_and_flush()
+
+    # ---- reads ----------------------------------------------------------
+
     def search(self, query_embedding: List[float], top_k: int = 5) -> List[str]:
         """Search and return top-k text chunks."""
-        if not self._is_trained or self.index.ntotal == 0:
-            return []
-
-        query_array = np.array([query_embedding]).astype("float32")
-        distances, indices = self.index.search(query_array, top_k)
-
-        results = []
-        for idx in indices[0]:
-            if 0 <= idx < len(self._texts):
-                results.append(self._texts[idx])
-        return results
+        indices = self.search_indices(query_embedding, top_k)
+        return [self._texts[idx] for idx in indices]
 
     def search_indices(self, query_embedding: List[float], top_k: int = 5) -> List[int]:
         """Search and return top-k chunk indices."""
-        if not self._is_trained or self.index.ntotal == 0:
+        self._flush()
+        if not self._is_trained or self.index is None or self.index.ntotal == 0:
             return []
 
-        query_array = np.array([query_embedding]).astype("float32")
+        self.index.nprobe = self.nprobe
+        query_array = np.asarray([query_embedding], dtype="float32")
         distances, indices = self.index.search(query_array, top_k)
         return [int(idx) for idx in indices[0] if 0 <= idx < len(self._texts)]
 
+    # ---- persistence ----------------------------------------------------
+
     def save(self, path: str) -> None:
         """Save index to disk as {path}.faiss_ivf."""
+        self._flush()
+        if self.index is None:
+            raise ValueError("Cannot save an IVF index with no vectors.")
         faiss.write_index(self.index, f"{path}.faiss_ivf.index")
         with open(f"{path}.faiss_ivf.pkl", "wb") as f:
             pickle.dump(
@@ -80,6 +138,7 @@ class FAISSIVFBackend(SemanticSearchBackend):
                     "metadata": self._metadata,
                     "n_clusters": self.n_clusters,
                     "is_trained": self._is_trained,
+                    "nprobe": self.nprobe,
                 },
                 f,
             )
@@ -101,6 +160,9 @@ class FAISSIVFBackend(SemanticSearchBackend):
         self._metadata = data.get("metadata", [{} for _ in self._texts])
         self.n_clusters = data.get("n_clusters", self.n_clusters)
         self._is_trained = data.get("is_trained", True)
+        self.nprobe = data.get("nprobe", self.nprobe)
+        self._pending = []
+        self.index.nprobe = self.nprobe
 
     @property
     def texts(self) -> List[str]:

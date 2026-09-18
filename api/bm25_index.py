@@ -7,8 +7,13 @@ import os
 import pickle
 from typing import List
 
-import numpy as np
 from rank_bm25 import BM25Okapi
+
+from api.lexical import tokenize, top_k_indices
+
+# Bumped when the tokeniser changes, so a stale index is rebuilt rather than
+# queried with a tokeniser it was not built with.
+INDEX_FORMAT_VERSION = 2
 
 
 class BM25Index:
@@ -19,13 +24,20 @@ class BM25Index:
     def build(self, texts: List[str]) -> None:
         """Tokenise texts and build the BM25 index."""
         self.texts = texts
-        tokenized = [t.lower().split() for t in texts]
+        tokenized = [tokenize(t) for t in texts]
         self._bm25 = BM25Okapi(tokenized)
 
     def save(self, path: str) -> None:
         """Persist the index to {path}.bm25."""
         with open(f"{path}.bm25", "wb") as f:
-            pickle.dump({"bm25": self._bm25, "texts": self.texts}, f)
+            pickle.dump(
+                {
+                    "bm25": self._bm25,
+                    "texts": self.texts,
+                    "version": INDEX_FORMAT_VERSION,
+                },
+                f,
+            )
 
     def load(self, path: str) -> None:
         """Load a previously saved index from {path}.bm25."""
@@ -34,6 +46,12 @@ class BM25Index:
             raise FileNotFoundError(f"BM25 index not found: {bm25_path}")
         with open(bm25_path, "rb") as f:
             data = pickle.load(f)
+        if data.get("version") != INDEX_FORMAT_VERSION:
+            raise ValueError(
+                f"BM25 index '{bm25_path}' was built by an older version "
+                f"(format {data.get('version', 1)}, expected {INDEX_FORMAT_VERSION}) "
+                "and uses a different tokeniser. Re-ingest the collection."
+            )
         self._bm25 = data["bm25"]
         self.texts = data["texts"]
 
@@ -44,10 +62,11 @@ class BM25Index:
         """
         if self._bm25 is None or not self.texts:
             return []
-        tokens = query.lower().split()
+        tokens = tokenize(query)
+        if not tokens:
+            return []
         scores = self._bm25.get_scores(tokens)
-        top = int(min(top_k, len(self.texts)))
-        return [int(i) for i in np.argsort(scores)[::-1][:top]]
+        return top_k_indices(scores, min(top_k, len(self.texts)))
 
     def get_texts(self, indices: List[int]) -> List[str]:
         """Return the text chunks at the given indices."""

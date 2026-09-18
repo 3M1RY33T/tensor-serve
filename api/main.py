@@ -9,6 +9,7 @@ import requests
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from api.ai_client import AIClient
 from api.cache import query_cache
@@ -31,7 +32,7 @@ from api.zim_collections import (
     set_active_collection,
     update_collection,
 )
-from api.vectordb import VectorDB
+from api.vectordb import VectorDB, index_exists
 from api.zim_downloader import (
     ZIM_FOLDER,
     bytes_to_human,
@@ -56,6 +57,8 @@ class AppState:
         self.db_name = None
         self.ai_client = AIClient()
         self.active_collection = None
+        self.chunk_index_lookup = {}
+        self.chunk_index_token = None
 
 
 app_state = AppState()
@@ -85,7 +88,7 @@ async def lifespan(app: FastAPI):
     if app_state.active_collection:
         category_id = app_state.active_collection["id"]
         db_name = f"{category_id}_db"
-        if os.path.exists(f"{db_name}.index") and os.path.exists(f"{db_name}.pkl"):
+        if index_exists(db_name):
             try:
                 app_state.db = VectorDB(dim=384)
                 app_state.db.load(db_name)
@@ -113,6 +116,8 @@ async def lifespan(app: FastAPI):
     app_state.bm25 = None
     app_state.db_loaded = False
     app_state.db_name = None
+    app_state.chunk_index_lookup = {}
+    app_state.chunk_index_token = None
 
 
 app = FastAPI(
@@ -1217,84 +1222,107 @@ def load_db(name: str = "zim_db"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _retrieval_settings() -> dict:
+    """
+    Every setting the retrieval pipeline reads, resolved once.
+
+    /search and the chat proxy each used to read their own subset, so the proxy
+    silently ran without query expansion, ignored max_search_candidates and
+    always reranked with the 'lightweight' model whatever the profile said.
+    Both now take their settings from here.
+    """
+
+    def value(key, fallback):
+        # `or` would turn a deliberate 0 / False back into the fallback — which
+        # is how a configured relevance_threshold of 0.0 became 0.05.
+        configured = get_config_value(key)
+        return fallback if configured is None else configured
+
+    return {
+        "relevance_threshold": value("relevance_threshold", 0.0),
+        "reranker_enabled": value("reranker_enabled", False),
+        "reranker_model": value("reranker_model", "lightweight"),
+        "keyword_search_mode": value("keyword_search_mode", "auto"),
+        "semantic_search_mode": value("semantic_search_mode", "auto"),
+        "query_expansion_enabled": value("query_expansion_enabled", False),
+        "query_expansion_type": value("query_expansion_type", "none"),
+        "max_search_candidates": get_config_value("max_search_candidates"),
+        "web_search_enabled": value("web_search_enabled", False),
+        "web_search_results": value("web_search_results", 3),
+    }
+
+
+def _retrieve(query: str, top_k: int) -> tuple:
+    """
+    Run the retrieval pipeline for one query.
+
+    Shared by /search and the OpenAI-compatible proxy so the two cannot drift
+    apart again. Returns (chunks, search_mode).
+    """
+    from api.hybrid_search import hybrid_search
+    from api.query_analyzer import QueryAnalyzer
+    from api.web_search import web_search_manager
+
+    settings = _retrieval_settings()
+    search_mode = QueryAnalyzer.select_search_mode(
+        query, settings["keyword_search_mode"], settings["semantic_search_mode"]
+    )
+
+    cached = query_cache.get_search_result(query, search_mode, top_k)
+    if cached is not None:
+        return cached, search_mode
+
+    query_embedding = query_cache.get_embedding(query)
+    if query_embedding is None:
+        query_embedding = app_state.embedder.encode([query])[0]
+        query_cache.cache_embedding(query, query_embedding)
+
+    web_results = None
+    if settings["web_search_enabled"] and QueryAnalyzer.is_time_sensitive(query):
+        web_results = web_search_manager.search(
+            query, num_results=settings["web_search_results"]
+        )
+
+    max_candidates = settings["max_search_candidates"]
+    if max_candidates is None:
+        max_candidates = top_k * 3
+
+    results = hybrid_search(
+        query=query,
+        query_embedding=query_embedding,
+        vectordb=app_state.db,
+        bm25_index=app_state.bm25,
+        top_k=top_k,
+        candidate_k=max(max_candidates, 10),
+        relevance_threshold=settings["relevance_threshold"],
+        search_mode=search_mode,
+        web_results=web_results,
+        query_expansion_enabled=settings["query_expansion_enabled"],
+        query_expansion_type=settings["query_expansion_type"],
+    )
+
+    if settings["reranker_enabled"] and results:
+        from api.reranker import rerank_results
+
+        results = rerank_results(
+            query=query,
+            documents=results,
+            top_k=top_k,
+            reranker_enabled=True,
+            reranker_model=settings["reranker_model"],
+        )
+
+    query_cache.cache_search_result(query, search_mode, top_k, results)
+    return results, search_mode
+
+
 @app.post("/search")
 def search(req: SearchRequest):
     if not app_state.db_loaded or app_state.db is None:
         raise HTTPException(status_code=400, detail="DB not loaded. Call /load first.")
 
     try:
-        from api.hybrid_search import hybrid_search
-        from api.query_analyzer import QueryAnalyzer
-        from api.web_search import web_search_manager
-
-        relevance_threshold = get_config_value("relevance_threshold") or 0.05
-        reranker_enabled = get_config_value("reranker_enabled")
-        if reranker_enabled is None:
-            reranker_enabled = False
-        reranker_model = get_config_value("reranker_model") or "lightweight"
-        
-        # Get search mode customization settings
-        keyword_search_mode = get_config_value("keyword_search_mode") or "auto"
-        semantic_search_mode = get_config_value("semantic_search_mode") or "auto"
-        
-        # Get query expansion settings
-        query_expansion_enabled = get_config_value("query_expansion_enabled") or False
-        query_expansion_type = get_config_value("query_expansion_type") or "none"
-        
-        search_mode = QueryAnalyzer.select_search_mode(req.query, keyword_search_mode, semantic_search_mode)
-        
-        # Check cache first
-        cached_results = query_cache.get_search_result(req.query, search_mode, req.top_k)
-        if cached_results is not None:
-            results = cached_results
-        else:
-            cached_embedding = query_cache.get_embedding(req.query)
-            if cached_embedding is not None:
-                query_embedding = cached_embedding
-            else:
-                query_embedding = app_state.embedder.encode([req.query])[0]
-                query_cache.cache_embedding(req.query, query_embedding)
-            
-            # Detect if query needs web search
-            web_results = None
-            web_search_enabled = get_config_value("web_search_enabled")
-            if web_search_enabled and QueryAnalyzer.is_time_sensitive(req.query):
-                web_search_results_count = get_config_value("web_search_results") or 3
-                web_results = web_search_manager.search(req.query, num_results=web_search_results_count)
-            
-            # Get configured max_search_candidates (falls back to default)
-            max_candidates = get_config_value("max_search_candidates")
-            if max_candidates is None:
-                max_candidates = req.top_k * 3
-            
-            results = hybrid_search(
-                query=req.query,
-                query_embedding=query_embedding,
-                vectordb=app_state.db,
-                bm25_index=app_state.bm25,
-                top_k=req.top_k,
-                candidate_k=max(max_candidates, 10),
-                relevance_threshold=relevance_threshold,
-                search_mode=search_mode,
-                web_results=web_results,
-                query_expansion_enabled=query_expansion_enabled,
-                query_expansion_type=query_expansion_type,
-            )
-            
-            # Re-rank results if enabled
-            if reranker_enabled and results:
-                from api.reranker import rerank_results
-                results = rerank_results(
-                    query=req.query,
-                    documents=results,
-                    top_k=req.top_k,
-                    reranker_enabled=True,
-                    reranker_model=reranker_model,
-                )
-            
-            # Cache search results
-            query_cache.cache_search_result(req.query, search_mode, req.top_k, results)
-        
+        results, search_mode = _retrieve(req.query, req.top_k)
         return {
             "query": req.query,
             "results": results,
@@ -1302,6 +1330,7 @@ def search(req: SearchRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 def _require_ai_endpoint() -> str:
@@ -1443,76 +1472,25 @@ def _context_for_query(query: str) -> list:
     if not app_state.db_loaded or app_state.db is None:
         return []
 
-    from api.hybrid_search import hybrid_search
     from api.query_analyzer import QueryAnalyzer
-    from api.web_search import web_search_manager
 
     query_analysis_enabled = get_config_value("query_analysis_enabled")
     if query_analysis_enabled is None:
         query_analysis_enabled = True
 
     if query_analysis_enabled:
-        needs_rag, reason = QueryAnalyzer.needs_rag(query)
-    else:
-        needs_rag = True
-        reason = "query_analysis_disabled"
+        needs_rag, _reason = QueryAnalyzer.needs_rag(query)
+        if not needs_rag:
+            return []
 
-    if not needs_rag:
-        return []
+    context_size = get_config_value("context_size")
+    if context_size is None:
+        context_size = 3
 
-    context_size = get_config_value("context_size") or 3
-    relevance_threshold = get_config_value("relevance_threshold") or 0.05
-    reranker_enabled = get_config_value("reranker_enabled")
-    if reranker_enabled is None:
-        reranker_enabled = False
+    # Same pipeline /search runs — see _retrieve.
+    chunks, _mode = _retrieve(query, context_size)
+    return chunks
 
-    # Get search mode customization settings
-    keyword_search_mode = get_config_value("keyword_search_mode") or "auto"
-    semantic_search_mode = get_config_value("semantic_search_mode") or "auto"
-
-    search_mode = QueryAnalyzer.select_search_mode(query, keyword_search_mode, semantic_search_mode)
-    cached_chunks = query_cache.get_search_result(query, search_mode, context_size)
-    if cached_chunks is not None:
-        return cached_chunks
-
-    cached_embedding = query_cache.get_embedding(query)
-    if cached_embedding is not None:
-        query_embedding = cached_embedding
-    else:
-        query_embedding = app_state.embedder.encode([query])[0]
-        query_cache.cache_embedding(query, query_embedding)
-
-    # Detect if query needs web search
-    web_results = None
-    web_search_enabled = get_config_value("web_search_enabled")
-    if web_search_enabled and QueryAnalyzer.is_time_sensitive(query):
-        web_search_results_count = get_config_value("web_search_results") or 3
-        web_results = web_search_manager.search(query, num_results=web_search_results_count)
-
-    context_chunks = hybrid_search(
-        query=query,
-        query_embedding=query_embedding,
-        vectordb=app_state.db,
-        bm25_index=app_state.bm25,
-        top_k=context_size,
-        candidate_k=max(context_size * 3, 10),
-        relevance_threshold=relevance_threshold,
-        search_mode=search_mode,
-        web_results=web_results,
-    )
-
-    if reranker_enabled and context_chunks:
-        from api.reranker import rerank_results
-
-        context_chunks = rerank_results(
-            query=query,
-            documents=context_chunks,
-            top_k=context_size,
-            reranker_enabled=True,
-        )
-
-    query_cache.cache_search_result(query, search_mode, context_size, context_chunks)
-    return context_chunks
 
 
 def _payload_with_context(payload: dict, context_chunks: list) -> dict:
@@ -1538,15 +1516,33 @@ def _pop_show_resources(payload: dict) -> bool:
     return bool(value)
 
 
+def _chunk_index_lookup(db) -> dict:
+    """
+    Map chunk text back to its index, built once per loaded database.
+
+    This used to be rebuilt on every chat request, walking the whole corpus to
+    recover indices the search stage already had: 410ms per request at 200k
+    chunks. Cached against the identity of the loaded index, so it is rebuilt
+    when a different collection is loaded and not before.
+    """
+    texts = getattr(db, "texts", [])
+    token = (id(db), len(texts))
+    if app_state.chunk_index_token != token:
+        lookup = {}
+        for idx, text in enumerate(texts):
+            lookup.setdefault(text, idx)
+        app_state.chunk_index_lookup = lookup
+        app_state.chunk_index_token = token
+    return app_state.chunk_index_lookup
+
+
 def _metadata_for_chunks(context_chunks: list) -> list:
     """Return chunk metadata for retrieved chunks when the loaded DB has it."""
     db = app_state.db
     if db is None or not getattr(db, "metadata", None):
         return []
 
-    index_by_text = {}
-    for idx, text in enumerate(getattr(db, "texts", [])):
-        index_by_text.setdefault(text, idx)
+    index_by_text = _chunk_index_lookup(db)
 
     metadata = []
     for chunk in context_chunks:
@@ -1652,7 +1648,14 @@ async def chat_completions(request: Request):
         )
 
     user_message = _last_user_text(messages)
-    context_chunks = _context_for_query(user_message) if user_message else []
+    # Retrieval is CPU-bound — embedding, the BM25 scan and the cross-encoder
+    # all block. Run it off the event loop so concurrent chat requests do not
+    # serialise behind each other.
+    context_chunks = (
+        await run_in_threadpool(_context_for_query, user_message)
+        if user_message
+        else []
+    )
     show_resources = _pop_show_resources(payload)
     if app_state.ai_client.model:
         payload["model"] = app_state.ai_client.model

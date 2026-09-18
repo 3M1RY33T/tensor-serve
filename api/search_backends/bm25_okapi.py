@@ -7,10 +7,12 @@ import os
 import pickle
 from typing import List
 
-import numpy as np
 from rank_bm25 import BM25Okapi
 
+from api.lexical import tokenize, top_k_indices
 from api.search_backends.base import KeywordSearchBackend
+
+INDEX_FORMAT_VERSION = 2
 
 
 class BM25OkapiBackend(KeywordSearchBackend):
@@ -26,17 +28,18 @@ class BM25OkapiBackend(KeywordSearchBackend):
     def build(self, texts: List[str]) -> None:
         """Build BM25 index from texts."""
         self._texts = texts
-        tokenized = [t.lower().split() for t in texts]
+        tokenized = [tokenize(t) for t in texts]
         self._bm25 = BM25Okapi(tokenized)
 
     def search_indices(self, query: str, top_k: int) -> List[int]:
         """Return top-k chunk indices ranked by BM25 relevance."""
         if self._bm25 is None or not self._texts:
             return []
-        tokens = query.lower().split()
+        tokens = tokenize(query)
+        if not tokens:
+            return []
         scores = self._bm25.get_scores(tokens)
-        top = int(min(top_k, len(self._texts)))
-        return [int(i) for i in np.argsort(scores)[::-1][:top]]
+        return top_k_indices(scores, min(top_k, len(self._texts)))
 
     def get_texts(self, indices: List[int]) -> List[str]:
         """Retrieve text chunks at indices."""
@@ -45,7 +48,14 @@ class BM25OkapiBackend(KeywordSearchBackend):
     def save(self, path: str) -> None:
         """Save index to disk as {path}.bm25."""
         with open(f"{path}.bm25", "wb") as f:
-            pickle.dump({"bm25": self._bm25, "texts": self._texts}, f)
+            pickle.dump(
+                {
+                    "bm25": self._bm25,
+                    "texts": self._texts,
+                    "version": INDEX_FORMAT_VERSION,
+                },
+                f,
+            )
 
     def load(self, path: str) -> None:
         """Load index from {path}.bm25."""
@@ -54,5 +64,11 @@ class BM25OkapiBackend(KeywordSearchBackend):
             raise FileNotFoundError(f"BM25 index not found: {bm25_path}")
         with open(bm25_path, "rb") as f:
             data = pickle.load(f)
+        if data.get("version") != INDEX_FORMAT_VERSION:
+            raise ValueError(
+                f"BM25 index '{bm25_path}' was built by an older version "
+                f"(format {data.get('version', 1)}, expected {INDEX_FORMAT_VERSION}) "
+                "and uses a different tokeniser. Re-ingest the collection."
+            )
         self._bm25 = data["bm25"]
         self._texts = data["texts"]

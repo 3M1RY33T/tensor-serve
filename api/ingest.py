@@ -11,19 +11,24 @@ def run_ingestion(zim_path: str, output_name="zim_db"):
     embedder = Embedder()
     db = None
 
-    batch_texts = []
     batch_chunks = []
     batch_metadata = []
 
     for article in tqdm(iterate_articles(zim_path)):
         clean = clean_text(article["text"])
-        chunks = chunk_text(clean)
+        # Size chunks to what the embedding model can actually read, so no chunk
+        # is indexed by its opening fragment alone.
+        chunks = chunk_text(
+            clean,
+            overlap=30,
+            tokenizer=embedder.tokenizer,
+            max_tokens=embedder.max_tokens,
+        )
 
         if not chunks:  # Skip empty articles
             continue
 
         batch_chunks.extend(chunks)
-        batch_texts.extend(chunks)
         batch_metadata.extend(
             {
                 "zim_title": article.get("zim_title"),
@@ -33,21 +38,20 @@ def run_ingestion(zim_path: str, output_name="zim_db"):
             for _ in chunks
         )
 
-        if len(batch_texts) >= 100:
-            embeddings = embedder.encode(batch_texts)
+        if len(batch_chunks) >= 100:
+            embeddings = embedder.encode(batch_chunks)
 
             if db is None:
                 db = VectorDB(dim=len(embeddings[0]))
 
             db.add(embeddings, batch_chunks, batch_metadata)
 
-            batch_texts = []
             batch_chunks = []
             batch_metadata = []
 
     # Process remaining batch
-    if batch_texts:
-        embeddings = embedder.encode(batch_texts)
+    if batch_chunks:
+        embeddings = embedder.encode(batch_chunks)
         if db is None:
             db = VectorDB(dim=len(embeddings[0]))
         db.add(embeddings, batch_chunks, batch_metadata)
