@@ -35,10 +35,29 @@ def isolated_config(tmp_path, monkeypatch):
     return tmp_path
 
 
+DIM = 8
+
+
+def _corpus_vectors():
+    """One-hot vectors, so similarity to a chosen query is exactly known."""
+    return np.eye(DIM, dtype="float32")[: len(CORPUS)]
+
+
+def _low_similarity_query():
+    """
+    A query with a real direction but low similarity to everything indexed.
+
+    Needed to exercise the gate itself: a query with no direction, or with no
+    indexed terms, now returns nothing before the gate is ever consulted.
+    cosine with each one-hot chunk is 1/sqrt(8) = 0.354, under the 0.45 floor.
+    """
+    return np.ones(DIM, dtype="float32") / np.sqrt(DIM)
+
+
 @pytest.fixture
 def index():
-    db = VectorDB(dim=4)
-    db.add(np.eye(4, dtype="float32"), list(CORPUS))
+    db = VectorDB(dim=DIM)
+    db.add(_corpus_vectors(), list(CORPUS))
     bm25 = BM25Index()
     bm25.build(list(CORPUS))
     return db, bm25
@@ -60,7 +79,7 @@ def test_candidates_carry_their_index_and_scores(index):
     db, bm25 = index
     outcome = search(
         query="asyncio gather awaitables",
-        query_embedding=np.eye(4, dtype="float32")[0],
+        query_embedding=np.eye(DIM, dtype="float32")[0],
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -76,7 +95,7 @@ def test_candidates_carry_their_index_and_scores(index):
 def test_cosine_is_a_real_similarity_not_a_rank(index):
     """cos = 1 - d/2 over unit vectors, so an exact match scores 1.0."""
     db, _ = index
-    scored = db.backend.search_scored(np.eye(4, dtype="float32")[0], 4)
+    scored = db.backend.search_scored(np.eye(DIM, dtype="float32")[0], 4)
     assert scored[0] == (0, pytest.approx(1.0))
     assert all(-1.01 <= s <= 1.01 for _, s in scored)
 
@@ -94,7 +113,7 @@ def test_abstains_on_words_absent_from_the_corpus(index):
     db, bm25 = index
     outcome = search(
         query="zorpquix vempthal glirnwub kreshplom",
-        query_embedding=np.zeros(4, dtype="float32"),
+        query_embedding=_low_similarity_query(),
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -109,7 +128,7 @@ def test_answers_a_question_whose_words_are_in_the_corpus(index):
     db, bm25 = index
     outcome = search(
         query="asyncio gather awaitables",
-        query_embedding=np.zeros(4, dtype="float32"),
+        query_embedding=_low_similarity_query(),
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -127,7 +146,7 @@ def test_semantic_confidence_rescues_a_question_with_no_shared_words(index):
     db, bm25 = index
     outcome = search(
         query="zorpquix vempthal glirnwub",
-        query_embedding=np.eye(4, dtype="float32")[0],  # cosine 1.0 with chunk 0
+        query_embedding=np.eye(DIM, dtype="float32")[0],  # cosine 1.0 with chunk 0
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -144,7 +163,7 @@ def test_gate_is_skipped_when_no_signal_exists_to_judge_with(index):
     db, _ = index
     outcome = search(
         query="zorpquix vempthal glirnwub",
-        query_embedding=np.zeros(4, dtype="float32"),
+        query_embedding=_low_similarity_query(),
         vectordb=None,
         bm25_index=NoScoreBM25(),
         top_k=3,
@@ -158,7 +177,7 @@ def test_abstention_can_be_switched_off(index):
     db, bm25 = index
     outcome = search(
         query="zorpquix vempthal glirnwub kreshplom",
-        query_embedding=np.zeros(4, dtype="float32"),
+        query_embedding=_low_similarity_query(),
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -172,7 +191,7 @@ def test_floors_are_configurable(index):
     db, bm25 = index
     outcome = search(
         query="asyncio gather awaitables",
-        query_embedding=np.eye(4, dtype="float32")[0],
+        query_embedding=np.eye(DIM, dtype="float32")[0],
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -192,7 +211,7 @@ def test_web_results_bypass_the_gate(index):
     db, bm25 = index
     outcome = search(
         query="zorpquix vempthal glirnwub kreshplom",
-        query_embedding=np.zeros(4, dtype="float32"),
+        query_embedding=_low_similarity_query(),
         vectordb=db,
         bm25_index=bm25,
         top_k=10,
@@ -210,7 +229,7 @@ def test_text_only_wrapper_still_returns_strings(index):
     db, bm25 = index
     results = hybrid_search(
         query="asyncio gather",
-        query_embedding=np.eye(4, dtype="float32")[0],
+        query_embedding=np.eye(DIM, dtype="float32")[0],
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -223,7 +242,7 @@ def test_text_only_wrapper_does_not_abstain(index):
     db, bm25 = index
     results = hybrid_search(
         query="zorpquix vempthal glirnwub kreshplom",
-        query_embedding=np.zeros(4, dtype="float32"),
+        query_embedding=_low_similarity_query(),
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
@@ -238,20 +257,53 @@ def test_cosine_ignores_query_magnitude(index):
     semantic gate.
     """
     db, _ = index
-    unit = np.eye(4, dtype="float32")[0]
+    unit = np.eye(DIM, dtype="float32")[0]
 
     assert db.backend.search_scored(unit, 2) == db.backend.search_scored(unit * 7, 2)
-    assert db.backend.search_scored(np.zeros(4, dtype="float32"), 2) == []
+    assert db.backend.search_scored(np.zeros(DIM, dtype="float32"), 2) == []
 
 
 def test_zero_query_vector_does_not_pass_the_semantic_gate(index):
     db, bm25 = index
     outcome = search(
         query="zorpquix vempthal glirnwub kreshplom",
-        query_embedding=np.zeros(4, dtype="float32"),
+        query_embedding=np.zeros(DIM, dtype="float32"),
         vectordb=db,
         bm25_index=bm25,
         top_k=3,
     )
     assert outcome.abstained
     assert outcome.best_cosine == 0.0
+
+
+def test_unindexed_terms_retrieve_nothing_rather_than_zero_scored_chunks(index):
+    """
+    rank_bm25 scored the whole corpus, so a query with no indexed term still
+    came back with arbitrary chunks scoring exactly 0. Postings return nothing.
+    """
+    _, bm25 = index
+    assert bm25.search_indices("zorpquix vempthal glirnwub", 5) == []
+    assert bm25.search_scored("zorpquix vempthal glirnwub", 5) == []
+
+
+def test_no_index_and_no_evidence_are_different_reasons(index):
+    """An empty result should say whether it found nothing or judged nothing."""
+    db, bm25 = index
+
+    judged = search(
+        query="zorpquix vempthal glirnwub kreshplom",
+        query_embedding=_low_similarity_query(),
+        vectordb=db,
+        bm25_index=bm25,
+        top_k=3,
+    )
+    assert judged.reason == "no_lexical_or_semantic_evidence"
+
+    nothing = search(
+        query="zorpquix vempthal glirnwub kreshplom",
+        query_embedding=np.zeros(DIM, dtype="float32"),
+        vectordb=db,
+        bm25_index=bm25,
+        top_k=3,
+    )
+    assert nothing.reason == "no_index"

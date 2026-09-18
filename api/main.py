@@ -1634,6 +1634,7 @@ def clean_working_files():
     - Vector database index files (*.index)
     - Vector database text stores (*.pkl)
     - BM25 keyword index files (*.bm25)
+    - Shared chunk text stores (*.chunks)
     - Python bytecode cache (__pycache__/)
     - Build artifacts (build/, dist/, *.egg-info/)
     - Configuration files (auto-generated on startup)
@@ -1647,7 +1648,7 @@ def clean_working_files():
     errors = []
 
     # Remove vector DB index and text-store files
-    for pattern in ("*.index", "*.pkl", "*.bm25"):
+    for pattern in ("*.index", "*.pkl", "*.bm25", "*.chunks"):
         for path in sorted(glob.glob(pattern)):
             try:
                 os.remove(path)

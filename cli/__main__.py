@@ -59,15 +59,16 @@ def _print_json(value):
 
 
 def _existing_vector_db(name):
-    index_path = Path(f"{name}.index")
-    text_path = Path(f"{name}.pkl")
-    bm25_path = Path(f"{name}.bm25")
+    """Describe one database by the files its backend actually writes."""
+    from api.vectordb import database_files, index_exists
+
+    files = database_files(name)
     return {
         "name": name,
-        "index": str(index_path),
-        "texts": str(text_path),
-        "bm25": str(bm25_path) if bm25_path.exists() else None,
-        "complete": index_path.exists() and text_path.exists(),
+        "index": files["vectors"],
+        "texts": files["chunks"],
+        "bm25": files["bm25"] if Path(files["bm25"]).exists() else None,
+        "complete": index_exists(name),
     }
 
 
@@ -235,15 +236,19 @@ def ingest_command(args):
 
 
 def db_list(args):
+    from api.vectordb import list_databases
+
     dbs = []
-    for index_path in sorted(Path(".").glob("*.index")):
-        name = index_path.with_suffix("").name
-        info = _existing_vector_db(name)
-        info["index_size"] = _human_file_size(info["index"])
-        if Path(info["texts"]).exists():
-            info["texts_size"] = _human_file_size(info["texts"])
-        if info["bm25"]:
-            info["bm25_size"] = _human_file_size(info["bm25"])
+    for found in list_databases("."):
+        info = {
+            "name": found["name"],
+            "variant": found["variant"],
+            "complete": found["complete"],
+        }
+        for label, path in found["files"].items():
+            info[f"{label}_size"] = _human_file_size(path)
+        if found["missing"]:
+            info["missing"] = found["missing"]
         dbs.append(info)
     _print_json({"databases": dbs, "count": len(dbs)})
 
@@ -952,7 +957,7 @@ def main():
     # ZIM clean
     zim_subparsers.add_parser(
         "clean",
-        help="Remove working files (*.index, *.pkl, *.bm25, __pycache__)"
+        help="Remove working files (*.index, *.pkl, *.bm25, *.chunks, __pycache__)"
     )
 
     # Config command

@@ -11,7 +11,7 @@
     },
     "passage": {
       "abstention": 0.0,
-      "mrr": 0.7378,
+      "mrr": 0.7311,
       "n": 60,
       "precision_at_1": 0.6167,
       "recall_at_k": 0.95
@@ -25,17 +25,17 @@
     },
     "title": {
       "abstention": 0.0,
-      "mrr": 0.7861,
+      "mrr": 0.7833,
       "n": 60,
       "precision_at_1": 0.6333,
       "recall_at_k": 0.9833
     }
   },
   "latency_ms": {
-    "cold_start": 122.16,
-    "max": 64.12,
-    "p50": 13.28,
-    "p90": 35.04
+    "cold_start": 105.53,
+    "max": 42.88,
+    "p50": 6.42,
+    "p90": 25.21
   },
   "sample": 60,
   "seed": 0,
@@ -55,10 +55,10 @@
     "web_search_results": 3
   },
   "stage_latency_ms": {
-    "bm25": 19.492,
-    "embed": 4.577,
-    "faiss": 0.219,
-    "fuse": 20.046
+    "bm25": 0.221,
+    "embed": 5.925,
+    "faiss": 0.23,
+    "fuse": 0.51
   },
   "top_k": 5
 }

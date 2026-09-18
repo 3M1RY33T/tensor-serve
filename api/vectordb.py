@@ -8,8 +8,8 @@ from api.search_backends import get_semantic_backend
 # the startup auto-load previously probed "{name}.index" / "{name}.pkl", which
 # no backend has ever written, so it never fired.
 _BACKEND_FILES = {
-    "faiss_flat": (".faiss_flat.index", ".faiss_flat.pkl"),
-    "faiss_ivf": (".faiss_ivf.index", ".faiss_ivf.pkl"),
+    "faiss_flat": (".faiss_flat.index", ".chunks"),
+    "faiss_ivf": (".faiss_ivf.index", ".faiss_ivf.pkl", ".chunks"),
 }
 
 
@@ -38,6 +38,48 @@ def index_exists(path: str, variant: str = None) -> bool:
     if not suffixes:
         return False
     return all(os.path.exists(f"{path}{suffix}") for suffix in suffixes)
+
+
+def database_files(path: str, variant: str = None) -> dict:
+    """Every file belonging to one database, whether or not it exists."""
+    variant = variant or _configured("semantic_backend", "faiss_flat")
+    files = {
+        "vectors": f"{path}.{variant}.index",
+        "chunks": f"{path}.chunks",
+        "bm25": f"{path}.bm25",
+    }
+    if variant == "faiss_ivf":
+        files["params"] = f"{path}.faiss_ivf.pkl"
+    return files
+
+
+def list_databases(directory: str = ".") -> list:
+    """
+    Discover built databases by the files their backends actually write.
+
+    Discovery used to glob "*.index" and strip one suffix, which reported
+    "python_docs.faiss_flat" as the database name and then looked for its
+    keyword index under that name, finding none.
+    """
+    found = []
+    for variant, suffixes in _BACKEND_FILES.items():
+        marker = f".{variant}.index"
+        for entry in sorted(os.listdir(directory or ".")):
+            if not entry.endswith(marker):
+                continue
+            name = entry[: -len(marker)]
+            path = os.path.join(directory, name) if directory not in ("", ".") else name
+            files = database_files(path, variant)
+            found.append(
+                {
+                    "name": name,
+                    "variant": variant,
+                    "files": {k: v for k, v in files.items() if os.path.exists(v)},
+                    "missing": [v for v in files.values() if not os.path.exists(v)],
+                    "complete": index_exists(path, variant),
+                }
+            )
+    return found
 
 
 class VectorDB:

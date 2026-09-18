@@ -11,6 +11,7 @@ from typing import List, Tuple
 import faiss
 import numpy as np
 
+from api.chunk_store import ChunkStore, load_shared
 from api.search_backends.base import SemanticSearchBackend
 
 
@@ -56,8 +57,7 @@ class FAISSIVFBackend(SemanticSearchBackend):
         self.nprobe = nprobe
         self.quantizer = faiss.IndexFlatL2(dim)
         self.index = None
-        self._texts: List[str] = []
-        self._metadata: List[dict] = []
+        self._store = ChunkStore()
         self._is_trained = False
         self._pending: List[np.ndarray] = []
 
@@ -108,10 +108,7 @@ class FAISSIVFBackend(SemanticSearchBackend):
         if embeddings_array.ndim == 1:
             embeddings_array = embeddings_array.reshape(1, -1)
 
-        self._texts.extend(chunks)
-        if metadata is None:
-            metadata = [{} for _ in chunks]
-        self._metadata.extend(metadata)
+        self._store.extend(chunks, metadata)
 
         if self._is_trained:
             self.index.add(embeddings_array)
@@ -127,7 +124,7 @@ class FAISSIVFBackend(SemanticSearchBackend):
     def search(self, query_embedding: List[float], top_k: int = 5) -> List[str]:
         """Search and return top-k text chunks."""
         indices = self.search_indices(query_embedding, top_k)
-        return [self._texts[idx] for idx in indices]
+        return [self._store.texts[idx] for idx in indices]
 
     def search_indices(self, query_embedding: List[float], top_k: int = 5) -> List[int]:
         """Search and return top-k chunk indices."""
@@ -138,7 +135,7 @@ class FAISSIVFBackend(SemanticSearchBackend):
         self.index.nprobe = self.nprobe
         query_array = np.asarray([query_embedding], dtype="float32")
         distances, indices = self.index.search(query_array, top_k)
-        return [int(idx) for idx in indices[0] if 0 <= idx < len(self._texts)]
+        return [int(idx) for idx in indices[0] if 0 <= idx < len(self._store.texts)]
 
     # ---- persistence ----------------------------------------------------
 
@@ -166,7 +163,7 @@ class FAISSIVFBackend(SemanticSearchBackend):
         return [
             (int(idx), float(1.0 - dist / 2.0))
             for dist, idx in zip(distances[0], indices[0])
-            if 0 <= idx < len(self._texts)
+            if 0 <= idx < len(self._store.texts)
         ]
 
     def save(self, path: str) -> None:
@@ -175,11 +172,10 @@ class FAISSIVFBackend(SemanticSearchBackend):
         if self.index is None:
             raise ValueError("Cannot save an IVF index with no vectors.")
         faiss.write_index(self.index, f"{path}.faiss_ivf.index")
+        self._store.save(path)
         with open(f"{path}.faiss_ivf.pkl", "wb") as f:
             pickle.dump(
                 {
-                    "texts": self._texts,
-                    "metadata": self._metadata,
                     "n_clusters": self.n_clusters,
                     "is_trained": self._is_trained,
                     "nprobe": self.nprobe,
@@ -198,10 +194,9 @@ class FAISSIVFBackend(SemanticSearchBackend):
             raise FileNotFoundError(f"FAISS IVF metadata not found: {pkl_path}")
 
         self.index = faiss.read_index(index_path)
+        self._store = load_shared(path)
         with open(pkl_path, "rb") as f:
             data = pickle.load(f)
-        self._texts = data.get("texts", [])
-        self._metadata = data.get("metadata", [{} for _ in self._texts])
         self.n_clusters = data.get("n_clusters", self.n_clusters)
         self._is_trained = data.get("is_trained", True)
         self.nprobe = data.get("nprobe", self.nprobe)
@@ -211,9 +206,18 @@ class FAISSIVFBackend(SemanticSearchBackend):
     @property
     def texts(self) -> List[str]:
         """Get all indexed texts."""
-        return self._texts
+        return self._store.texts
 
     @property
     def metadata(self) -> List[dict]:
         """Get metadata for all chunks."""
-        return self._metadata
+        return self._store.metadata
+
+    @property
+    def store(self) -> ChunkStore:
+        """The shared chunk store backing this index."""
+        return self._store
+
+    def attach(self, store: ChunkStore) -> None:
+        """Point this index at an already-loaded chunk store."""
+        self._store = store

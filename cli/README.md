@@ -149,7 +149,7 @@ tensor-serve db status
 
 Available database commands:
 
-- `list` — Show local databases with matching `.index` and `.pkl` files
+- `list` — Show local databases, discovered by the files their backend writes (`.faiss_flat.index`, `.chunks`, `.bm25`)
 - `show <name>` — Inspect the files for one local database
 - `load <name>` / `use <name>` — Call the running server's `/load?name=<db>` endpoint to switch the in-memory database
 - `status` — Call the running server's `/health` endpoint to show loaded database status

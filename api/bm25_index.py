@@ -1,39 +1,70 @@
 """
 BM25 keyword index — built alongside the FAISS vector index during ingestion
 and used by the hybrid search pipeline.
+
+Scoring walks an inverted index (see api.bm25), so a query touches only the
+chunks containing one of its terms rather than the whole collection.
 """
 
 import os
 import pickle
-from typing import List
+from typing import Dict, List, Tuple
 
-from rank_bm25 import BM25Okapi
+from api.bm25 import PostingsBM25
+from api.chunk_store import ChunkStore, load_shared
 
-from api.lexical import tokenize, top_k_indices
+# 2 introduced the shared tokeniser; 3 replaced rank_bm25 with postings.
+INDEX_FORMAT_VERSION = 3
 
-# Bumped when the tokeniser changes, so a stale index is rebuilt rather than
-# queried with a tokeniser it was not built with.
-INDEX_FORMAT_VERSION = 2
+# BM25+ differs from Okapi only by a lower-bound term, so both are the same
+# postings index with a different delta.
+_VARIANT_DELTA = {"bm25_okapi": 0.0, "bm25_plus": 1.0}
+
+
+def _configured_variant() -> str:
+    """The keyword backend named in config, defaulting to Okapi."""
+    try:
+        from api.config import get_config_value
+
+        return get_config_value("keyword_backend") or "bm25_okapi"
+    except Exception:
+        return "bm25_okapi"
 
 
 class BM25Index:
-    def __init__(self):
-        self._bm25: BM25Okapi | None = None
+    def __init__(self, variant: str = None):
+        """
+        Args:
+            variant: 'bm25_okapi' or 'bm25_plus'. Defaults to the configured
+                     keyword_backend — which every call site used to ignore,
+                     leaving bm25_plus unreachable however the profile was set.
+        """
+        self.variant = variant or _configured_variant()
+        if self.variant not in _VARIANT_DELTA:
+            raise ValueError(
+                f"Unknown keyword backend '{self.variant}'. "
+                f"Choose one of: {', '.join(sorted(_VARIANT_DELTA))}"
+            )
+        self._index = PostingsBM25(delta=_VARIANT_DELTA[self.variant])
         self.texts: List[str] = []
 
     def build(self, texts: List[str]) -> None:
         """Tokenise texts and build the BM25 index."""
         self.texts = texts
-        tokenized = [tokenize(t) for t in texts]
-        self._bm25 = BM25Okapi(tokenized)
+        self._index.build(texts)
 
     def save(self, path: str) -> None:
-        """Persist the index to {path}.bm25."""
+        """
+        Persist the postings to {path}.bm25.
+
+        Chunk text is not written here: it lives in {path}.chunks, which the
+        vector index writes and both indexes read.
+        """
         with open(f"{path}.bm25", "wb") as f:
             pickle.dump(
                 {
-                    "bm25": self._bm25,
-                    "texts": self.texts,
+                    "index": self._index.to_dict(),
+                    "variant": self.variant,
                     "version": INDEX_FORMAT_VERSION,
                 },
                 f,
@@ -49,52 +80,33 @@ class BM25Index:
         if data.get("version") != INDEX_FORMAT_VERSION:
             raise ValueError(
                 f"BM25 index '{bm25_path}' was built by an older version "
-                f"(format {data.get('version', 1)}, expected {INDEX_FORMAT_VERSION}) "
-                "and uses a different tokeniser. Re-ingest the collection."
+                f"(format {data.get('version', 1)}, expected {INDEX_FORMAT_VERSION}). "
+                "Re-ingest the collection."
             )
-        self._bm25 = data["bm25"]
-        self.texts = data["texts"]
+        self._index = PostingsBM25.from_dict(data["index"])
+        self.variant = data.get("variant", self.variant)
+        # Chunk text comes from the store the vector index also reads, so the
+        # corpus is held once in this process rather than once per index.
+        self.texts = load_shared(path).texts
 
     def search_indices(self, query: str, top_k: int) -> List[int]:
-        """
-        Return top_k chunk indices ranked by BM25 relevance (best first).
-        Returns an empty list if the index has not been built or loaded.
-        """
-        if self._bm25 is None or not self.texts:
-            return []
-        tokens = tokenize(query)
-        if not tokens:
-            return []
-        scores = self._bm25.get_scores(tokens)
-        return top_k_indices(scores, min(top_k, len(self.texts)))
+        """Top-k chunk indices ranked by BM25 relevance (best first)."""
+        return self._index.search_indices(query, top_k)
 
-
-    def search_scored(self, query: str, top_k: int):
+    def search_scored(self, query: str, top_k: int) -> List[Tuple[int, float]]:
         """Top-k (index, BM25 score) pairs, best first."""
-        if self._bm25 is None or not self.texts:
-            return []
-        tokens = tokenize(query)
-        if not tokens:
-            return []
-        scores = self._bm25.get_scores(tokens)
-        return [
-            (idx, float(scores[idx]))
-            for idx in top_k_indices(scores, min(top_k, len(self.texts)))
-        ]
+        return self._index.search_scored(query, top_k)
 
-    def term_evidence(self, query: str) -> dict:
+    def term_evidence(self, query: str) -> Dict[str, float]:
         """
         IDF of each query term that exists in the corpus at all.
 
-        What separates a real question from nonsense is whether its words are
-        in the corpus, not how the scores are spread — margin and ratio tests
-        invert on real data. Terms absent from the vocabulary are simply
-        missing from this mapping, so summed evidence is zero for gibberish.
+        What separates a real question from nonsense is whether its words are in
+        the corpus, not how the scores are spread — margin and ratio tests invert
+        on real data. Terms absent from the vocabulary are simply missing here,
+        so summed evidence is exactly zero for gibberish.
         """
-        if self._bm25 is None:
-            return {}
-        idf = getattr(self._bm25, "idf", {}) or {}
-        return {t: float(idf[t]) for t in set(tokenize(query)) if t in idf and idf[t] > 0}
+        return self._index.term_evidence(query)
 
     def get_texts(self, indices: List[int]) -> List[str]:
         """Return the text chunks at the given indices."""

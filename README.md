@@ -28,6 +28,33 @@ Search requests and OpenAI-compatible chat requests can run **up to three retrie
 
 Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in multiple result sets float to the top. The pipeline degrades gracefully — if one index is unavailable it is skipped.
 
+### Index layout and performance
+
+Keyword scoring walks an inverted index, so a query touches only the chunks containing one
+of its terms rather than the whole collection. Measured on a synthetic corpus of 500-word
+chunks:
+
+| corpus | BM25 query p50 before | after |
+|---|---|---|
+| 20,000 chunks | 25.79 ms | **0.22 ms** |
+| 80,000 chunks | 104.86 ms | **0.85 ms** |
+
+On 10,399 chunks of real documentation the per-stage breakdown is now embed 4.5ms, BM25
+0.24ms, FAISS 0.22ms — retrieval costs less than embedding the query, which is the
+irreducible part. Building the index is slower in exchange (22.7s at 80,000 chunks), a
+one-time cost traded against every query.
+
+A collection is three files, and the chunk text is stored once:
+
+```
+<name>.faiss_flat.index    vectors
+<name>.chunks              chunk text and metadata, shared by both indexes
+<name>.bm25                postings, document lengths and IDF
+```
+
+Both indexes read `<name>.chunks` through a process-wide cache, so the corpus is held once
+in memory as well as once on disk — 39.4MB total for the 10,399-chunk corpus, down from 51.0MB.
+
 ### Abstention — knowing when not to answer
 
 Retrieval returns scored candidates, not bare text, so the pipeline can tell the difference
