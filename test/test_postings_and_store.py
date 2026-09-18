@@ -278,3 +278,40 @@ def test_saved_index_records_which_variant_built_it(tmp_path, isolated_config):
     loaded = BM25Index(variant="bm25_okapi")
     loaded.load(path)
     assert loaded.variant == "bm25_plus", "the index did not record its own variant"
+
+
+def test_the_chat_proxy_is_served_from_the_query_cache(isolated_config, monkeypatch):
+    """
+    The cache stored chunk text only, and the proxy needs candidate indices, so
+    it wrote to the cache and never read from it — paying full retrieval on
+    every repeat question while /search got hits.
+    """
+    db = VectorDB(dim=4)
+    db.add(np.eye(4, dtype="float32"), CORPUS[:4])
+    bm25 = BM25Index()
+    bm25.build(list(db.texts))
+
+    monkeypatch.setattr(main.app_state, "embedder", StubEmbedder())
+    monkeypatch.setattr(main.app_state, "db", db)
+    monkeypatch.setattr(main.app_state, "bm25", bm25)
+    monkeypatch.setattr(main.app_state, "db_loaded", True)
+    main.query_cache.clear()
+
+    query = "asyncio gather awaitables"
+
+    first = main._context_for_query(query)
+    assert first, "nothing retrieved"
+
+    searches = []
+    original = bm25.search_scored
+
+    def spy(q, k):
+        searches.append(q)
+        return original(q, k)
+
+    bm25.search_scored = spy
+    second = main._context_for_query(query)
+
+    assert searches == [], "the proxy re-ran retrieval instead of using the cache"
+    assert [c.index for c in second] == [c.index for c in first]
+    assert [c.text for c in second] == [c.text for c in first]

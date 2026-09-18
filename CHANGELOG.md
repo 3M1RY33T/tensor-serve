@@ -51,6 +51,9 @@ evaluation harness that generates its own gold answers from your corpus.
   (410ms at 200,000 chunks); candidates carry their own index.
 - Retrieval runs off the event loop, so concurrent chat requests no longer
   serialise behind each other.
+- The query cache now holds the whole retrieval outcome rather than chunk text
+  alone, so the chat proxy is served from it — it previously wrote to the cache
+  and never read from it.
 - Chunk text is stored once on disk and held once in memory: 51.0MB → 39.4MB
   for a 10,399-chunk collection.
 

@@ -85,10 +85,13 @@ def retrieve(
         query, settings["keyword_search_mode"], settings["semantic_search_mode"]
     )
 
-    if cache is not None and not detailed:
+    # The cache holds the whole outcome, not just the chunk text, so the chat
+    # proxy — which needs candidate indices for source attribution — can be
+    # served from it too. Caching text alone silently excluded it.
+    if cache is not None:
         cached = cache.get_search_result(query, search_mode, top_k)
         if cached is not None:
-            return cached, search_mode
+            return (cached if detailed else cached.texts), search_mode
 
     query_embedding = cache.get_embedding(query) if cache is not None else None
     if query_embedding is None:
@@ -146,7 +149,7 @@ def retrieve(
         )
 
     if cache is not None:
-        cache.cache_search_result(query, search_mode, top_k, results)
+        cache.cache_search_result(query, search_mode, top_k, outcome)
 
     if detailed:
         return outcome, search_mode
