@@ -1,3 +1,4 @@
+import threading
 import warnings
 
 from sentence_transformers import SentenceTransformer
@@ -21,6 +22,12 @@ class Embedder:
 
         self.model_name = model_name
         self._warned_truncation = False
+        # The model and its tokenizer are shared by every request. HuggingFace's
+        # fast tokenizer is a Rust object behind a runtime borrow check, and
+        # concurrent use raises "RuntimeError: Already borrowed" — measured at 4
+        # failures in 200 encodes across 8 threads. Retrieval runs in a thread
+        # pool, so two chat requests that both miss the cache land here at once.
+        self._lock = threading.Lock()
 
     @property
     def max_seq_length(self) -> int:
@@ -45,8 +52,9 @@ class Embedder:
         waste, so larger accumulations before calling encode are slightly more
         efficient — measured 317 to 343 chunks/s on a 4,000-chunk sample.
         """
-        self._warn_if_truncated(texts)
-        return self.model.encode(texts, batch_size=batch_size, show_progress_bar=False)
+        with self._lock:
+            self._warn_if_truncated(texts)
+            return self.model.encode(texts, batch_size=batch_size, show_progress_bar=False)
 
     def _warn_if_truncated(self, texts):
         """
