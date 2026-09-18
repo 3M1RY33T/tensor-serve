@@ -7,6 +7,8 @@ import re
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple
 
+from api.lexical import tokenize
+
 
 class QueryExpander(ABC):
     """Abstract base for query expansion strategies."""
@@ -48,16 +50,24 @@ class PseudoRelevanceFeedbackExpander(QueryExpander):
         self.max_expansion_terms = max_expansion_terms
 
     def expand(self, query: str, top_result: Optional[str] = None) -> str:
-        """Expand query with top terms from top result."""
+        """
+        Expand query with top terms from top result.
+
+        Returns the query unchanged when no first-pass result is supplied —
+        pseudo-relevance feedback has nothing to feed back from. Callers must
+        run a first retrieval pass and pass its top hit as ``top_result``.
+
+        Terms come from the shared lexical tokeniser, so an expansion term is
+        spelled the same way the keyword index spelled it.
+        """
         if not top_result:
             return query
 
-        query_terms = set(query.lower().split())
-        result_terms = top_result.lower().split()
+        query_terms = set(tokenize(query))
 
         # Find novel high-frequency terms from result
         term_freq = {}
-        for term in result_terms:
+        for term in tokenize(top_result):
             if term not in query_terms and len(term) > 3:  # Skip short terms and query terms
                 term_freq[term] = term_freq.get(term, 0) + 1
 

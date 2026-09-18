@@ -14,5 +14,7 @@ config.json
 .tensor_config.key
 .DS_Store
 collections.json
+graphify-out/
+*.chunks
 # graphify build output, never committed
 graphify-out/

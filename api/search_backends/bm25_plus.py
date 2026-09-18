@@ -1,128 +1,95 @@
 """
 BM25+ keyword search backend.
-Enhanced BM25 variant with improved term saturation and precision.
+
+BM25+ adds a lower-bound term to BM25, so it is the shared postings index (see
+api.bm25) with a non-zero delta rather than a separate scoring implementation.
 """
 
+import json
 import os
-import pickle
-from typing import List
+from typing import Dict, List, Tuple
 
 import numpy as np
 
+from api.bm25 import PostingsBM25
+from api.durability import atomic_write
+from api.chunk_store import load_shared
 from api.search_backends.base import KeywordSearchBackend
+
+INDEX_FORMAT_VERSION = 4
+
+_MAGIC = b"TSBM25\x00\x00"
+DELTA = 1.0
 
 
 class BM25PlusBackend(KeywordSearchBackend):
     """
     BM25+ variant keyword search backend.
-    Improved precision over standard BM25 with better term saturation.
-    Better for production use and large collections.
+
+    The delta term is identical for every document given a query, so it shifts
+    all scores equally and never changes their order; it is kept so scores stay
+    comparable with the published formula.
     """
 
     def __init__(self):
-        self._tokenized_docs: List[List[str]] = []
+        self._index = PostingsBM25(delta=DELTA)
         self._texts: List[str] = []
-        self._idf: dict = {}
-        self._doc_lengths: List[int] = []
-        self._avgdl: float = 0.0
-        self._k1 = 1.5
-        self._b = 0.75
-        self._delta = 1.0
 
     def build(self, texts: List[str]) -> None:
-        """Build BM25+ index from texts."""
         self._texts = texts
-        self._tokenized_docs = [t.lower().split() for t in texts]
-        self._doc_lengths = [len(doc) for doc in self._tokenized_docs]
-
-        if not self._doc_lengths:
-            self._avgdl = 0.0
-            return
-
-        self._avgdl = sum(self._doc_lengths) / len(self._doc_lengths)
-
-        # Calculate IDF for each term
-        num_docs = len(self._tokenized_docs)
-        doc_freqs = {}
-
-        for doc in self._tokenized_docs:
-            unique_terms = set(doc)
-            for term in unique_terms:
-                doc_freqs[term] = doc_freqs.get(term, 0) + 1
-
-        for term, freq in doc_freqs.items():
-            self._idf[term] = np.log(
-                (num_docs - freq + 0.5) / (freq + 0.5) + 1
-            )
+        self._index.build(texts)
 
     def search_indices(self, query: str, top_k: int) -> List[int]:
-        """Return top-k chunk indices ranked by BM25+ relevance."""
-        if not self._tokenized_docs or not self._texts:
-            return []
+        return self._index.search_indices(query, top_k)
 
-        query_terms = query.lower().split()
-        scores = [self._score_doc(i, query_terms) for i in range(len(self._texts))]
+    def search_scored(self, query: str, top_k: int) -> List[Tuple[int, float]]:
+        return self._index.search_scored(query, top_k)
 
-        top = int(min(top_k, len(self._texts)))
-        return [int(i) for i in np.argsort(scores)[::-1][:top]]
-
-    def _score_doc(self, doc_idx: int, query_terms: List[str]) -> float:
-        """Calculate BM25+ score for a document."""
-        score = 0.0
-        doc = self._tokenized_docs[doc_idx]
-        doc_len = self._doc_lengths[doc_idx]
-
-        for term in query_terms:
-            if term not in self._idf:
-                continue
-
-            term_freq = doc.count(term)
-            idf = self._idf[term]
-
-            # BM25+ formula with delta term
-            numerator = term_freq * (self._k1 + 1)
-            denominator = (
-                term_freq
-                + self._k1
-                * (1 - self._b + self._b * (doc_len / self._avgdl))
-            )
-            score += idf * (numerator / denominator + self._delta)
-
-        return score
+    def term_evidence(self, query: str) -> Dict[str, float]:
+        return self._index.term_evidence(query)
 
     def get_texts(self, indices: List[int]) -> List[str]:
-        """Retrieve text chunks at indices."""
         return [self._texts[i] for i in indices if i < len(self._texts)]
 
+    @property
+    def texts(self) -> List[str]:
+        return self._texts
+
     def save(self, path: str) -> None:
-        """Save index to disk as {path}.bm25plus."""
-        with open(f"{path}.bm25plus", "wb") as f:
-            pickle.dump(
-                {
-                    "tokenized_docs": self._tokenized_docs,
-                    "texts": self._texts,
-                    "idf": self._idf,
-                    "doc_lengths": self._doc_lengths,
-                    "avgdl": self._avgdl,
-                    "k1": self._k1,
-                    "b": self._b,
-                    "delta": self._delta,
-                },
-                f,
-            )
+        """Persist the postings to {path}.bm25plus; text lives in {path}.chunks."""
+        payload = self._index.to_arrays()
+        payload["meta"] = np.frombuffer(
+            json.dumps(
+                {"version": INDEX_FORMAT_VERSION, "variant": getattr(self, "variant", None)}
+            ).encode("utf-8"),
+            dtype=np.uint8,
+        )
+        with atomic_write(f"{path}.bm25plus", "wb") as f:
+            f.write(_MAGIC)
+            np.savez(f, **payload)
 
     def load(self, path: str) -> None:
-        """Load index from {path}.bm25plus."""
+        """Load the postings, and attach the shared chunk store."""
         bm25plus_path = f"{path}.bm25plus"
         if not os.path.exists(bm25plus_path):
-            raise FileNotFoundError(f"BM25+ index not found: {bm25plus_path}")
-        with open(bm25plus_path, "rb") as f:
-            data = pickle.load(f)
-        self._tokenized_docs = data["tokenized_docs"]
-        self._texts = data["texts"]
-        self._idf = data["idf"]
-        self._doc_lengths = data["doc_lengths"]
-        self._avgdl = data["avgdl"]
-        self._k1 = data.get("k1", 1.5)
-        self._b = data.get("b", 0.75)
-        self._delta = data.get("delta", 1.0)
+            raise FileNotFoundError(f"Keyword index not found: {bm25plus_path}")
+
+        with open(bm25plus_path, "rb") as handle:
+            if handle.read(len(_MAGIC)) != _MAGIC:
+                raise ValueError(
+                    f"'{bm25plus_path}' predates index format {INDEX_FORMAT_VERSION}. "
+                    "Re-ingest the collection."
+                )
+            # allow_pickle stays False: this file is derived from a downloaded ZIM.
+            with np.load(handle, allow_pickle=False) as data:
+                meta = json.loads(data["meta"].tobytes().decode("utf-8"))
+                if meta.get("version") != INDEX_FORMAT_VERSION:
+                    raise ValueError(
+                        f"'{bm25plus_path}' has index format {meta.get('version')}, "
+                        f"expected {INDEX_FORMAT_VERSION}. Re-ingest the collection."
+                    )
+                self._index = PostingsBM25.from_arrays(data)
+
+        # Chunk text comes from the store the vector index also reads, so the
+        # corpus is held once in this process rather than once per index.
+        self._texts = load_shared(path).texts

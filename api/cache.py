@@ -52,9 +52,15 @@ class QueryCache:
         query: str,
         search_mode: str,
         top_k: int,
-        results: List[str],
+        results,
     ) -> None:
-        """Cache a search result."""
+        """
+        Cache a search result.
+
+        Stores whatever the retrieval pipeline produced — a RetrievalOutcome,
+        carrying candidate indices and scores — rather than chunk text alone,
+        so every caller can be served from the cache.
+        """
         key = self._hash_search_key(query, search_mode, top_k)
         self.search_cache[key] = (results, time.time())
         # Keep LRU
@@ -66,7 +72,7 @@ class QueryCache:
         query: str,
         search_mode: str,
         top_k: int,
-    ) -> Optional[List[str]]:
+    ):
         """Retrieve cached search result if available and not expired."""
         key = self._hash_search_key(query, search_mode, top_k)
         if key not in self.search_cache:

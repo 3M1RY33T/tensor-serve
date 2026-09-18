@@ -25,7 +25,7 @@ DEFAULT_CONFIG = {
     "ai_extra_headers": {},
     "context_size": 3,
     "zim_source_folder": None,
-    "relevance_threshold": 0.05,
+    "relevance_threshold": 0.0,   # RRF scores are bounded; see _migrate_config
     "query_analysis_enabled": True,
     "reranker_enabled": False,
     "reranker_model": "lightweight",  # lightweight | balanced | production
@@ -40,9 +40,14 @@ DEFAULT_CONFIG = {
     "search_profile": "balanced",  # balanced | lightweight | production | manual
     "keyword_backend": "bm25_okapi",  # bm25_okapi | bm25_plus
     "semantic_backend": "faiss_flat",  # faiss_flat | faiss_ivf
+    "faiss_nprobe": 8,  # IVF cells probed per query; 1 (the FAISS default) loses recall
     "max_search_candidates": None,  # None = use profile default
     "query_expansion_enabled": False,
     "query_expansion_type": "none",  # none | prf | entity
+    # Abstention. Floors are measured, not guessed — see api/hybrid_search.py.
+    "abstention_enabled": True,
+    "lexical_evidence_floor": 1.0,       # summed IDF of query terms in the corpus
+    "semantic_confidence_floor": 0.45,   # cosine of the closest chunk
 }
 
 
@@ -154,12 +159,33 @@ def mask_config(config):
     return masked
 
 
+# Highest score Reciprocal Rank Fusion can produce, when a chunk is ranked
+# first by all three retrievers at once: 3 / (rrf_k + 1) with the default
+# rrf_k of 60. Any threshold at or above this filters out every result.
+_MAX_ATTAINABLE_RRF = 3.0 / 61.0
+
+
+def _migrate_config(config):
+    """
+    Repair settings that cannot produce results.
+
+    Releases up to and including 437b031 shipped relevance_threshold=0.05,
+    above the highest score RRF can return, so every search silently returned
+    nothing. Stored configs still carry that value, so reset any threshold that
+    no result could ever clear.
+    """
+    threshold = config.get("relevance_threshold")
+    if isinstance(threshold, (int, float)) and threshold >= _MAX_ATTAINABLE_RRF:
+        config["relevance_threshold"] = DEFAULT_CONFIG["relevance_threshold"]
+    return config
+
+
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, "r") as f:
                 raw_config = json.load(f)
-            decrypted = _decrypt_config(raw_config)
+            decrypted = _migrate_config(_decrypt_config(raw_config))
             if _has_plaintext_secret(raw_config):
                 save_config(decrypted)
             return decrypted

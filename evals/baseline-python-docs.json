@@ -1,0 +1,64 @@
+{
+  "articles": 494,
+  "corpus_chunks": 10399,
+  "families": {
+    "nonsense": {
+      "abstention": 1.0,
+      "mrr": 0.0,
+      "n": 15,
+      "precision_at_1": 0.0,
+      "recall_at_k": 0.0
+    },
+    "passage": {
+      "abstention": 0.0,
+      "mrr": 0.7311,
+      "n": 60,
+      "precision_at_1": 0.6167,
+      "recall_at_k": 0.95
+    },
+    "signature": {
+      "abstention": 0.0,
+      "mrr": 0.8602,
+      "n": 59,
+      "precision_at_1": 0.7797,
+      "recall_at_k": 0.9492
+    },
+    "title": {
+      "abstention": 0.0,
+      "mrr": 0.7833,
+      "n": 60,
+      "precision_at_1": 0.6333,
+      "recall_at_k": 0.9833
+    }
+  },
+  "latency_ms": {
+    "cold_start": 87.55,
+    "max": 40.95,
+    "p50": 6.56,
+    "p90": 27.27
+  },
+  "sample": 60,
+  "seed": 0,
+  "settings": {
+    "abstention_enabled": true,
+    "keyword_search_mode": "auto",
+    "lexical_evidence_floor": 1.0,
+    "max_search_candidates": null,
+    "query_expansion_enabled": false,
+    "query_expansion_type": "none",
+    "relevance_threshold": 0.0,
+    "reranker_enabled": false,
+    "reranker_model": "lightweight",
+    "semantic_confidence_floor": 0.45,
+    "semantic_search_mode": "auto",
+    "web_search_enabled": false,
+    "web_search_results": 3
+  },
+  "stage_latency_ms": {
+    "bm25": 0.222,
+    "embed": 6.207,
+    "faiss": 0.232,
+    "fuse": 0.503
+  },
+  "top_k": 5
+}

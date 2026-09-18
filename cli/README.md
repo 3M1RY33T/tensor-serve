@@ -149,12 +149,56 @@ tensor-serve db status
 
 Available database commands:
 
-- `list` — Show local databases with matching `.index` and `.pkl` files
+- `list` — Show local databases, discovered by the files their backend writes (`.faiss_flat.index`, `.chunks`, `.bm25`)
 - `show <name>` — Inspect the files for one local database
 - `load <name>` / `use <name>` — Call the running server's `/load?name=<db>` endpoint to switch the in-memory database
 - `status` — Call the running server's `/health` endpoint to show loaded database status
 
 Loading or switching a database changes state inside the running server process, so `db load` and `db status` require Tensor Serve to be running.
+
+## Retrieval Evaluation CLI (`tensor-serve eval`)
+
+Measure retrieval quality on a collection you have already ingested. Questions are
+generated from the corpus itself, so every gold answer is known by construction and
+nothing needs labelling by hand.
+
+```bash
+tensor-serve eval local_docs_db
+tensor-serve eval local_docs_db --top-k 10 --sample 100
+tensor-serve eval local_docs_db --baseline evals/baseline.json
+tensor-serve eval local_docs_db --seed 7 --json
+```
+
+Four question families, each with a different way of knowing the right answer:
+
+| family | how the gold answer is known |
+|---|---|
+| `passage` | a span copied verbatim out of one chunk — that chunk is the answer |
+| `title` | an article's own title — that article's chunks are the answer |
+| `signature` | an article's rarest terms — that article's chunks are the answer |
+| `nonsense` | words that appear nowhere in the corpus — abstaining is the answer |
+
+`signature` is an **upper bound**: it asks each article about its own rarest vocabulary,
+so a real question phrased in shared words scores lower. A low score there is a fact
+about your corpus, not necessarily a bug to tune away.
+
+`nonsense` measures **abstention**, reported as a first-class number. A pipeline that
+always returns its `top_k` chunks scores 0% and is telling you it cannot distinguish a
+real question from gibberish.
+
+Reported per family: recall@k, precision@1, MRR, and abstention rate. Reported once per
+run: query latency (p50 / p90 / max, with the cold first call shown separately) and a
+per-stage breakdown across embed, BM25, FAISS and fusion, so optimisation targets come
+from measurement rather than guesswork.
+
+Caching is bypassed and web search is disabled during a run, so the numbers describe
+retrieval rather than cache hits or the network.
+
+Record a baseline before changing retrieval, and compare against it afterwards:
+
+```bash
+tensor-serve eval local_docs_db --baseline evals/baseline.json
+```
 
 ## Collections CLI (`tensor-serve collections`)
 
