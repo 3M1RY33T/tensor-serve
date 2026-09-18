@@ -16,3 +16,5 @@ config.json
 collections.json
 graphify-out/
 *.chunks
+# graphify build output, never committed
+graphify-out/
