@@ -143,6 +143,36 @@ def test_word_chunking_still_works_without_a_tokenizer():
     chunks = chunk_text(" ".join(str(i) for i in range(30)), chunk_size=10, overlap=2)
     assert len(chunks) == 4
 
+def test_chunks_fit_the_real_tokenizer_not_just_the_offset_count():
+    """
+    Packing by offset count is close but not exact: re-tokenising a character
+    slice can yield more tokens than the span had in place, because a token at
+    the cut splits differently once its neighbours are gone. Ingesting real
+    articles produced a 257-token chunk against a 256-token model this way.
+    """
+    try:
+        from transformers import AutoTokenizer
+
+        tok = AutoTokenizer.from_pretrained(
+            "sentence-transformers/all-MiniLM-L6-v2", local_files_only=True
+        )
+    except Exception:
+        pytest.skip("all-MiniLM-L6-v2 tokenizer not cached locally")
+
+    limit, budget = 256, 254
+    text = (
+        "The asyncio.gather() coroutine runs awaitables concurrently; "
+        "see also loop.run_in_executor(), asyncio.wait_for() and "
+        "concurrent.futures.ThreadPoolExecutor for related APIs. "
+    ) * 60
+
+    chunks = chunk_text(text, overlap=30, tokenizer=tok, max_tokens=budget)
+
+    assert chunks
+    worst = max(len(tok.encode(c, add_special_tokens=True)) for c in chunks)
+    assert worst <= limit, f"a chunk reached {worst} tokens against a {limit}-token model"
+
+
 
 # --------------------------------------------------------------------------
 # Finding 06 — web results were appended to the live index

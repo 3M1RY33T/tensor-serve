@@ -80,8 +80,32 @@ def _chunk_by_tokens(text, tokenizer, max_tokens, overlap):
         window = offsets[start:start + max_tokens]
         if not window:
             continue
-        chunk = text[window[0][0]:window[-1][1]].strip()
+        chunk = _fit(text, window, tokenizer, max_tokens)
         if chunk:
             chunks.append(chunk)
 
     return chunks
+
+
+def _fit(text, window, tokenizer, max_tokens):
+    """
+    Slice the window out of text, shrinking it until it really fits.
+
+    Tokenisation is not compositional: re-tokenising a character slice can yield
+    a different count than the span had in place, because a token at the cut can
+    split differently once its neighbours are gone. Packing to the budget is
+    therefore close but not exact, so the result is verified and trimmed.
+    """
+    while window:
+        chunk = text[window[0][0]:window[-1][1]].strip()
+        if not chunk:
+            return ""
+        try:
+            length = len(tokenizer(chunk, add_special_tokens=False)["input_ids"])
+        except Exception:
+            return chunk
+        if length <= max_tokens:
+            return chunk
+        # Drop whole tokens from the tail rather than guessing at characters.
+        window = window[:-max(1, length - max_tokens)]
+    return ""

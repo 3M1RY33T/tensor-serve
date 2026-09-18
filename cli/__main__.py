@@ -273,6 +273,50 @@ def db_status(args):
     _print_json(result)
 
 
+def eval_command(args):
+    """Evaluate retrieval quality on a loaded collection, with generated golds."""
+    from api.bm25_index import BM25Index
+    from api.embedder import Embedder
+    from api.evaluation import render, run_eval, save_baseline
+    from api.vectordb import VectorDB, index_exists
+
+    name = args.db_name
+    if not index_exists(name):
+        raise SystemExit(
+            f"No vector database named '{name}'. Ingest a collection first, "
+            "or pass the database name as the first argument."
+        )
+
+    db = VectorDB(dim=args.dim)
+    db.load(name)
+
+    bm25 = None
+    try:
+        bm25 = BM25Index()
+        bm25.load(name)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"note: keyword index unavailable ({exc}); evaluating semantic search alone\n")
+        bm25 = None
+
+    report = run_eval(
+        db=db,
+        bm25=bm25,
+        embedder=Embedder(),
+        top_k=args.top_k,
+        sample=args.sample,
+        seed=args.seed,
+    )
+
+    if args.json:
+        _print_json(report)
+    else:
+        print(render(report))
+
+    if args.baseline:
+        save_baseline(report, args.baseline)
+        print(f"\nbaseline written to {args.baseline}")
+
+
 def db_command(args):
     if args.db_command == "list":
         db_list(args)
@@ -1194,6 +1238,34 @@ def main():
         help="Ingest every .zim file from a named collection"
     )
 
+    # Retrieval evaluation command
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Measure retrieval quality on a collection, using generated gold answers",
+    )
+    eval_parser.add_argument(
+        "db_name",
+        nargs="?",
+        default="zim_db",
+        help="Vector database to evaluate (default: zim_db)",
+    )
+    eval_parser.add_argument(
+        "--top-k", type=int, default=5, help="Chunks retrieved per question (default: 5)"
+    )
+    eval_parser.add_argument(
+        "--sample", type=int, default=40, help="Articles sampled per family (default: 40)"
+    )
+    eval_parser.add_argument(
+        "--seed", type=int, default=0, help="Sampling seed, for reproducible runs"
+    )
+    eval_parser.add_argument(
+        "--baseline", help="Write the full report to this JSON file"
+    )
+    eval_parser.add_argument(
+        "--dim", type=int, default=384, help="Embedding dimension (default: 384)"
+    )
+    eval_parser.add_argument("--json", action="store_true", help="Print the full report as JSON")
+
     # Vector database command
     db_parser = subparsers.add_parser(
         "db",
@@ -1372,6 +1444,8 @@ def main():
         reset_all_command(args)
     elif args.command == "ingest":
         ingest_command(args)
+    elif args.command == "eval":
+        eval_command(args)
     elif args.command == "db":
         if not args.db_command:
             db_parser.print_help()

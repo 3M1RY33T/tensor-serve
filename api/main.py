@@ -17,6 +17,7 @@ from api.config import get_config_value, load_config, reset_config, set_config_v
 from api.embedder import Embedder
 from api.ingest import run_ingestion
 from api.multi_ingest import run_multi_ingest
+from api.retrieval import retrieval_settings, retrieve
 from api.zim_collections import (
     add_files_to_collection,
     create_custom_collection,
@@ -1223,97 +1224,20 @@ def load_db(name: str = "zim_db"):
 
 
 def _retrieval_settings() -> dict:
-    """
-    Every setting the retrieval pipeline reads, resolved once.
-
-    /search and the chat proxy each used to read their own subset, so the proxy
-    silently ran without query expansion, ignored max_search_candidates and
-    always reranked with the 'lightweight' model whatever the profile said.
-    Both now take their settings from here.
-    """
-
-    def value(key, fallback):
-        # `or` would turn a deliberate 0 / False back into the fallback — which
-        # is how a configured relevance_threshold of 0.0 became 0.05.
-        configured = get_config_value(key)
-        return fallback if configured is None else configured
-
-    return {
-        "relevance_threshold": value("relevance_threshold", 0.0),
-        "reranker_enabled": value("reranker_enabled", False),
-        "reranker_model": value("reranker_model", "lightweight"),
-        "keyword_search_mode": value("keyword_search_mode", "auto"),
-        "semantic_search_mode": value("semantic_search_mode", "auto"),
-        "query_expansion_enabled": value("query_expansion_enabled", False),
-        "query_expansion_type": value("query_expansion_type", "none"),
-        "max_search_candidates": get_config_value("max_search_candidates"),
-        "web_search_enabled": value("web_search_enabled", False),
-        "web_search_results": value("web_search_results", 3),
-    }
+    """Settings for the retrieval pipeline. See api.retrieval."""
+    return retrieval_settings()
 
 
 def _retrieve(query: str, top_k: int) -> tuple:
-    """
-    Run the retrieval pipeline for one query.
-
-    Shared by /search and the OpenAI-compatible proxy so the two cannot drift
-    apart again. Returns (chunks, search_mode).
-    """
-    from api.hybrid_search import hybrid_search
-    from api.query_analyzer import QueryAnalyzer
-    from api.web_search import web_search_manager
-
-    settings = _retrieval_settings()
-    search_mode = QueryAnalyzer.select_search_mode(
-        query, settings["keyword_search_mode"], settings["semantic_search_mode"]
+    """Run the shared retrieval pipeline against the server's loaded indexes."""
+    return retrieve(
+        query,
+        top_k,
+        db=app_state.db,
+        bm25=app_state.bm25,
+        embedder=app_state.embedder,
+        cache=query_cache,
     )
-
-    cached = query_cache.get_search_result(query, search_mode, top_k)
-    if cached is not None:
-        return cached, search_mode
-
-    query_embedding = query_cache.get_embedding(query)
-    if query_embedding is None:
-        query_embedding = app_state.embedder.encode([query])[0]
-        query_cache.cache_embedding(query, query_embedding)
-
-    web_results = None
-    if settings["web_search_enabled"] and QueryAnalyzer.is_time_sensitive(query):
-        web_results = web_search_manager.search(
-            query, num_results=settings["web_search_results"]
-        )
-
-    max_candidates = settings["max_search_candidates"]
-    if max_candidates is None:
-        max_candidates = top_k * 3
-
-    results = hybrid_search(
-        query=query,
-        query_embedding=query_embedding,
-        vectordb=app_state.db,
-        bm25_index=app_state.bm25,
-        top_k=top_k,
-        candidate_k=max(max_candidates, 10),
-        relevance_threshold=settings["relevance_threshold"],
-        search_mode=search_mode,
-        web_results=web_results,
-        query_expansion_enabled=settings["query_expansion_enabled"],
-        query_expansion_type=settings["query_expansion_type"],
-    )
-
-    if settings["reranker_enabled"] and results:
-        from api.reranker import rerank_results
-
-        results = rerank_results(
-            query=query,
-            documents=results,
-            top_k=top_k,
-            reranker_enabled=True,
-            reranker_model=settings["reranker_model"],
-        )
-
-    query_cache.cache_search_result(query, search_mode, top_k, results)
-    return results, search_mode
 
 
 @app.post("/search")
