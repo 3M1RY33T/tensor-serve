@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
     "query_expansion_enabled": False,
     "query_expansion_type": "none",  # none | prf | entity
     # Abstention. Floors are measured, not guessed — see api/hybrid_search.py.
+    "embedding_backend": "auto",  # auto | torch | onnx | onnx-int8
     "abstention_enabled": True,
     "lexical_evidence_floor": 1.0,       # summed IDF of query terms in the corpus
     "semantic_confidence_floor": 0.45,   # cosine of the closest chunk

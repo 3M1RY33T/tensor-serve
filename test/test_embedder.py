@@ -16,7 +16,7 @@ def test_embedder_prefers_local_model_cache(monkeypatch):
 
     monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)
 
-    embedder = Embedder()
+    embedder = Embedder(backend="torch")
 
     assert calls == [("all-MiniLM-L6-v2", {"local_files_only": True})]
     assert embedder.encode(["hello"]) == [[1.0]]
@@ -36,7 +36,7 @@ def test_embedder_falls_back_to_download_when_cache_is_missing(monkeypatch):
 
     monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)
 
-    Embedder()
+    Embedder(backend="torch")
 
     assert calls == [
         ("all-MiniLM-L6-v2", {"local_files_only": True}),
@@ -52,7 +52,7 @@ def test_embedder_raises_clear_error_when_model_cannot_load(monkeypatch):
     monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)
 
     with pytest.raises(RuntimeError, match="Could not load embedding model"):
-        Embedder()
+        Embedder(backend="torch")
 
 
 def test_encode_is_safe_under_concurrent_use():
@@ -97,3 +97,80 @@ def test_encode_is_safe_under_concurrent_use():
         torch.set_num_threads(original_threads)
 
     assert not failures, f"{len(failures)} of {len(succeeded) + len(failures)}: {failures[:3]}"
+
+
+def test_unknown_backend_fails_loudly():
+    with pytest.raises(ValueError, match="Unknown embedding backend"):
+        Embedder(backend="not_a_backend")
+
+
+def test_a_missing_onnx_runtime_falls_back_to_torch(monkeypatch):
+    """
+    The ONNX runtime is an optional extra. Selecting it without installing it
+    must degrade to torch with a warning, not stop the server from starting.
+    """
+    attempts = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name, **kwargs):
+            attempts.append(kwargs)
+            if kwargs.get("backend") == "onnx":
+                raise ImportError("onnxruntime is not installed")
+
+        def encode(self, texts, batch_size=32, show_progress_bar=False):
+            return [[1.0] for _ in texts]
+
+    monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)
+
+    with pytest.warns(RuntimeWarning, match="unavailable"):
+        embedder = Embedder(backend="onnx")
+
+    assert embedder.backend == "torch"
+    assert any(a.get("backend") == "onnx" for a in attempts)
+
+
+def test_auto_prefers_onnx_when_the_runtime_is_present(monkeypatch):
+    monkeypatch.setattr(embedder_module, "_resolve_auto", lambda workload="query": "onnx")
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name, **kwargs):
+            self.kwargs = kwargs
+
+        def encode(self, texts, batch_size=32, show_progress_bar=False):
+            return [[1.0] for _ in texts]
+
+    monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)
+    assert Embedder(backend="auto").backend == "onnx"
+
+
+def test_bulk_workload_stays_on_torch(monkeypatch):
+    """
+    ONNX is 3.6x faster for single queries and 2.5x slower for long chunks in
+    large batches, so ingestion must not inherit the query backend.
+    """
+    assert embedder_module._resolve_auto("bulk") == "torch"
+
+
+def test_query_workload_prefers_onnx_when_available(monkeypatch):
+    import sys
+
+    if "onnxruntime" not in sys.modules:
+        try:
+            import onnxruntime  # noqa: F401
+        except ImportError:
+            pytest.skip("onnxruntime not installed")
+    assert embedder_module._resolve_auto("query") == "onnx"
+
+
+def test_for_ingest_selects_the_bulk_backend(monkeypatch):
+    class FakeSentenceTransformer:
+        def __init__(self, model_name, **kwargs):
+            pass
+
+        def encode(self, texts, batch_size=32, show_progress_bar=False):
+            return [[1.0] for _ in texts]
+
+    monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)
+    embedder = Embedder.for_ingest()
+    assert embedder.workload == "bulk"
+    assert embedder.backend == "torch"

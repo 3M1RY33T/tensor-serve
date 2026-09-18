@@ -1,0 +1,18 @@
+[package]
+name = "tensor_postings"
+version = "0.3.1"
+edition = "2021"
+
+[lib]
+name = "tensor_postings"
+crate-type = ["cdylib"]
+
+[dependencies]
+# abi3-py310 builds one wheel that works on every Python this project
+# supports (>=3.10), instead of one wheel per interpreter version.
+pyo3 = { version = "0.26", features = ["extension-module", "abi3-py310"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

@@ -13,7 +13,8 @@ EMBED_BATCH_CHUNKS = 512
 
 
 def _run_ingestion(zim_path: str, output_name="zim_db"):
-    embedder = Embedder()
+    # Bulk embedding: PyTorch batches long chunks 2.5x faster than ONNX.
+    embedder = Embedder.for_ingest()
     db = None
 
     batch_chunks = []

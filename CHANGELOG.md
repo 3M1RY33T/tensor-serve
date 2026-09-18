@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.3.1
+
+Performance, from measuring where the time actually goes. Retrieval quality is
+unchanged throughout — recall@5, precision@1, MRR and abstention all identical
+to v0.3.0 on the same corpus.
+
+### Query latency: 4.98ms -> 1.37ms
+
+- **ONNX Runtime for query embedding.** Embedding was 81% of a query. ONNX
+  Runtime is 3.4x faster than PyTorch for single short texts and produces the
+  same vectors (cosine 1.000000), so an existing index needs no rebuild.
+  Install with `pip install 'tensor-serve[onnx]'`; without it, torch is used.
+- ONNX Runtime is pinned to the CPU execution provider. Left to choose, it
+  selects CoreML on macOS, which supports 294 of the graph's 418 nodes and pays
+  partitioning overhead on every call — measured at 10.67ms/query, two and a
+  half times *slower* than PyTorch.
+- `embedding_backend` config: `auto` (default), `torch`, `onnx`, `onnx-int8`.
+- int8 quantisation is available but **not** the default: it buys 0.37ms per
+  query and costs 3.3pp of passage recall and 3.4pp of precision@1.
+
+### Concurrency: +103% at 8 threads
+
+- Concurrent single-query embeddings are coalesced into one model call.
+  Measured 734 -> 838 queries/s at one thread and 800 -> 1626 at eight.
+- Batching is opportunistic: nobody waits. A fixed 2ms gather window was tried
+  and measured worse at every thread count.
+
+### Ingestion
+
+- **Optional Rust extension for index building.** Building the keyword index is
+  the one genuinely Python-bound part of the pipeline; the extension is 2.8x
+  faster and produces a byte-identical index, verified against the Python path
+  in the test suite. Entirely optional — absent, the pure-Python path runs and
+  the main wheel stays pure Python. Build with `maturin build --release` in
+  `rust/`.
+- Ingestion pins PyTorch. The backend ranking inverts for bulk work: on real
+  250-token chunks in batches of 512, PyTorch does 323 chunks/s against ONNX's
+  127. Only single short queries favour ONNX.
+
+### Fixed
+
+- `Embedder.encode` serialises access to the shared model. HuggingFace's fast
+  tokenizer is a Rust object behind a runtime borrow check, and concurrent use
+  raised `RuntimeError: Already borrowed` — 4 failures in 200 encodes across 8
+  threads, each a 500 to a user. Retrieval runs in a thread pool, so two chat
+  requests that both missed the cache hit this.
+
 ## v0.3.0
 
 A rewrite of the retrieval pipeline, measured at every step against an

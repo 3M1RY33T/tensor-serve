@@ -95,7 +95,12 @@ def retrieve(
 
     query_embedding = cache.get_embedding(query) if cache is not None else None
     if query_embedding is None:
-        query_embedding = embedder.encode([query])[0]
+        # encode_query coalesces concurrent single-query calls into one model
+        # pass; embedders without it (test doubles) fall back to a plain encode.
+        encode_query = getattr(embedder, "encode_query", None)
+        query_embedding = (
+            encode_query(query) if encode_query else embedder.encode([query])[0]
+        )
         if cache is not None:
             cache.cache_embedding(query, query_embedding)
 

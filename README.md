@@ -103,7 +103,7 @@ On 10,399 chunks of real documentation, where the time goes per query:
 
 ```
   embed    before ██████▉                               4.16 ms
-           after  ███████▌                              4.50 ms
+           after  ██▍                                   1.42 ms   (ONNX Runtime)
 
   BM25     before ████████████████████████████████▊    19.75 ms
            after  ▍                                     0.24 ms
@@ -152,6 +152,54 @@ collection during a rebuild sees either the old index or the new one — never h
 
 Both indexes read `<name>.chunks` through a process-wide cache, so the corpus is held once
 in memory as well as once on disk — 39.4MB total for the 10,399-chunk corpus, down from 51.0MB.
+
+### Choosing an embedding backend
+
+Embedding is the largest single cost in the pipeline, and the fastest backend depends on
+what is being embedded. Measured on `all-MiniLM-L6-v2`:
+
+```
+single short query                          bulk: real 250-token chunks, batches of 512
+
+  PyTorch     ████████████████  4.00 ms       PyTorch     ████████████████  323 chunks/s
+  ONNX        ████▊             1.19 ms       ONNX        ██████▎           127 chunks/s
+  ONNX int8   ███▊              0.95 ms
+```
+
+The ranking inverts, so `embedding_backend: auto` (the default) picks ONNX Runtime for
+queries and PyTorch for ingestion. Both produce the same vectors — cosine 1.000000 — so an
+index built by one is queried correctly by the other, and switching needs no rebuild.
+
+ONNX Runtime is an optional extra:
+
+```bash
+pip install 'tensor-serve[onnx]'
+```
+
+Without it, everything runs on PyTorch. Two deliberate choices are worth knowing about:
+ONNX is pinned to the **CPU execution provider**, because left to choose it selects CoreML
+on macOS and runs at 10.67 ms/query — slower than PyTorch — by partitioning the graph; and
+**int8 quantisation is not the default**, because it buys 0.37 ms per query and costs 3.3
+points of passage recall.
+
+Concurrent queries are coalesced into single model calls, which roughly doubles throughput
+under load (800 → 1626 queries/s at eight threads) without slowing a lone caller.
+
+### Optional Rust extension
+
+Retrieval is already native — 81% of a query is inside PyTorch and 4% inside FAISS — so
+there is little for a compiled language to win there. Building the keyword index is the
+exception: it is loops over Python strings and dictionaries. An optional extension makes it
+**2.8x faster**, producing a byte-identical index that the test suite checks against the
+Python path.
+
+```bash
+cd rust && maturin build --release
+pip install target/wheels/tensor_postings-*.whl
+```
+
+It is entirely optional. The published `tensor-serve` wheel is pure Python, needs no Rust
+toolchain, and falls back to the Python builder when the extension is absent.
 
 ### Durability
 

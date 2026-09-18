@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tensor-serve"
-version = "0.3.0"
+version = "0.3.1"
 description = "ZIM-based retrieval augmented proxy for OpenAI-compatible AI"
 readme = "README.md"
 license = "MIT"
@@ -51,6 +51,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+onnx = [
+    "onnxruntime>=1.17",
+    "optimum[onnxruntime]>=1.20",
+]
 dev = [
     "build>=1.2.1",
     "pytest>=8.0.0",

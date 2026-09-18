@@ -25,7 +25,8 @@ def _run_multi_ingest(zim_paths: List[str], output_name="combined_db"):
     Returns:
         Dictionary with ingestion status
     """
-    embedder = Embedder()
+    # Bulk embedding: PyTorch batches long chunks 2.5x faster than ONNX.
+    embedder = Embedder.for_ingest()
     db = None
     total_articles = 0
     total_chunks = 0
