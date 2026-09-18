@@ -9,7 +9,7 @@ from api.search_backends import get_semantic_backend
 # no backend has ever written, so it never fired.
 _BACKEND_FILES = {
     "faiss_flat": (".faiss_flat.index", ".chunks"),
-    "faiss_ivf": (".faiss_ivf.index", ".faiss_ivf.pkl", ".chunks"),
+    "faiss_ivf": (".faiss_ivf.index", ".faiss_ivf.json", ".chunks"),
 }
 
 
@@ -40,6 +40,21 @@ def index_exists(path: str, variant: str = None) -> bool:
     return all(os.path.exists(f"{path}{suffix}") for suffix in suffixes)
 
 
+def save_collection(path: str, db, bm25=None) -> None:
+    """
+    Write a complete collection in the order a reader can survive.
+
+    The chunk store goes first and the vector index last, because
+    ``index_exists`` gates on the vector index: a crash part-way leaves a store
+    with no index beside it, which reads as "not built". The reverse order
+    would leave an index promising chunks that were never written.
+    """
+    db.backend.store.save(path)
+    if bm25 is not None:
+        bm25.save(path)
+    db.save_vectors_only(path)
+
+
 def database_files(path: str, variant: str = None) -> dict:
     """Every file belonging to one database, whether or not it exists."""
     variant = variant or _configured("semantic_backend", "faiss_flat")
@@ -49,7 +64,7 @@ def database_files(path: str, variant: str = None) -> dict:
         "bm25": f"{path}.bm25",
     }
     if variant == "faiss_ivf":
-        files["params"] = f"{path}.faiss_ivf.pkl"
+        files["params"] = f"{path}.faiss_ivf.json"
     return files
 
 
@@ -126,8 +141,17 @@ class VectorDB:
         self.backend.add(embeddings, chunks, metadata)
 
     def save(self, path="db"):
-        """Save index to disk."""
+        """Save the vector index and its chunk store."""
         self.backend.save(path)
+
+    def save_vectors_only(self, path="db"):
+        """
+        Save the vector index without rewriting the chunk store.
+
+        Used by save_collection, which writes the store first so the vector
+        index is the last file to appear.
+        """
+        self.backend.save_vectors(path)
 
     def load(self, path="db"):
         """Load index from disk."""

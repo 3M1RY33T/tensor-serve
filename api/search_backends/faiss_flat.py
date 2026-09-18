@@ -4,13 +4,14 @@ Standard exact L2 distance semantic search using FAISS IndexFlatL2.
 """
 
 import os
-import pickle
+
 from typing import List, Tuple
 
 import faiss
 import numpy as np
 
 from api.chunk_store import ChunkStore, load_shared
+from api.durability import atomic_replace
 from api.search_backends.base import SemanticSearchBackend
 
 
@@ -97,8 +98,16 @@ class FAISSFlatBackend(SemanticSearchBackend):
         Chunk text lives in the shared store rather than beside the vectors, so
         the keyword index does not have to keep a second copy of it.
         """
-        faiss.write_index(self.index, f"{path}.faiss_flat.index")
         self._store.save(path)
+        self.save_vectors(path)
+
+    def save_vectors(self, path: str) -> None:
+        """Write only the vector index, leaving the chunk store alone."""
+        # faiss writes through its own I/O, so stage it and swap it in.
+        target = f"{path}.faiss_flat.index"
+        staged = f"{target}.part"
+        faiss.write_index(self.index, staged)
+        atomic_replace(staged, target)
 
     def load(self, path: str) -> None:
         """Load vectors, and attach the shared chunk store."""

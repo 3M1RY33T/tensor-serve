@@ -11,7 +11,7 @@ def test_embedder_prefers_local_model_cache(monkeypatch):
         def __init__(self, model_name, **kwargs):
             calls.append((model_name, kwargs))
 
-        def encode(self, texts, show_progress_bar=False):
+        def encode(self, texts, batch_size=32, show_progress_bar=False):
             return [[1.0] for _ in texts]
 
     monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)
@@ -31,7 +31,7 @@ def test_embedder_falls_back_to_download_when_cache_is_missing(monkeypatch):
             if kwargs.get("local_files_only"):
                 raise OSError("missing local model")
 
-        def encode(self, texts, show_progress_bar=False):
+        def encode(self, texts, batch_size=32, show_progress_bar=False):
             return [[1.0] for _ in texts]
 
     monkeypatch.setattr(embedder_module, "SentenceTransformer", FakeSentenceTransformer)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tensor-serve"
-version = "0.2.0"
+version = "0.3.0"
 description = "ZIM-based retrieval augmented proxy for OpenAI-compatible AI"
 readme = "README.md"
 license = "MIT"
@@ -47,7 +47,6 @@ dependencies = [
     "requests>=2.31.0",
     "python-multipart>=0.0.7",
     "questionary>=2.0.0",
-    "rank-bm25>=0.2.2",
     "cryptography>=42.0.0",
 ]
 

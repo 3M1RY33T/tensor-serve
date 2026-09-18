@@ -15,6 +15,7 @@ which is non-negative for every term, so it needs none of the negative-IDF
 epsilon correction rank_bm25 carries.
 """
 
+import json
 import math
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
@@ -122,29 +123,65 @@ class PostingsBM25:
         }
 
     # ---- persistence ----------------------------------------------------
+    #
+    # Stored as flat arrays plus a JSON term list rather than a dict of arrays,
+    # so the file needs no pickle to load: an index is derived from a ZIM
+    # someone downloaded, and unpickling such a file runs whatever is in it.
+    # Flat arrays also load far faster than tens of thousands of small ones.
 
-    def to_dict(self) -> dict:
+    def to_arrays(self) -> dict:
+        terms = list(self._doc_ids)
+        term_offsets = np.zeros(len(terms) + 1, dtype=np.int64)
+        if terms:
+            np.cumsum([len(self._doc_ids[t]) for t in terms], out=term_offsets[1:])
+
+        doc_ids = (
+            np.concatenate([self._doc_ids[t] for t in terms])
+            if terms
+            else np.zeros(0, dtype=np.int64)
+        )
+        term_freqs = (
+            np.concatenate([self._term_freqs[t] for t in terms])
+            if terms
+            else np.zeros(0, dtype="float32")
+        )
+        idf = np.asarray([self._idf[t] for t in terms], dtype="float32")
+
         return {
-            "doc_ids": self._doc_ids,
-            "term_freqs": self._term_freqs,
-            "idf": self._idf,
+            "terms": np.frombuffer(
+                json.dumps(terms, ensure_ascii=False).encode("utf-8"), dtype=np.uint8
+            ),
+            "term_offsets": term_offsets,
+            "doc_ids": doc_ids,
+            "term_freqs": term_freqs,
+            "idf": idf,
             "doc_lengths": self._doc_lengths,
-            "avgdl": self._avgdl,
-            "n_docs": self._n_docs,
-            "k1": self.k1,
-            "b": self.b,
-            "delta": self.delta,
+            "params": np.asarray(
+                [self._avgdl, self._n_docs, self.k1, self.b, self.delta], dtype="float64"
+            ),
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "PostingsBM25":
-        index = cls(k1=data.get("k1", 1.5), b=data.get("b", 0.75), delta=data.get("delta", 0.0))
-        index._doc_ids = data["doc_ids"]
-        index._term_freqs = data["term_freqs"]
-        index._idf = data["idf"]
-        index._doc_lengths = data["doc_lengths"]
-        index._avgdl = data["avgdl"]
-        index._n_docs = data["n_docs"]
+    def from_arrays(cls, data) -> "PostingsBM25":
+        params = data["params"]
+        index = cls(k1=float(params[2]), b=float(params[3]), delta=float(params[4]))
+        index._avgdl = float(params[0])
+        index._n_docs = int(params[1])
+        index._doc_lengths = np.asarray(data["doc_lengths"], dtype="float32")
+
+        terms = json.loads(data["terms"].tobytes().decode("utf-8") or "[]")
+        offsets = data["term_offsets"]
+        doc_ids = data["doc_ids"]
+        term_freqs = data["term_freqs"]
+        idf = data["idf"]
+
+        index._doc_ids = {
+            term: doc_ids[offsets[i] : offsets[i + 1]] for i, term in enumerate(terms)
+        }
+        index._term_freqs = {
+            term: term_freqs[offsets[i] : offsets[i + 1]] for i, term in enumerate(terms)
+        }
+        index._idf = {term: float(idf[i]) for i, term in enumerate(terms)}
         return index
 
     @property

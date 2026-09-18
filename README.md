@@ -44,16 +44,48 @@ On 10,399 chunks of real documentation the per-stage breakdown is now embed 4.5m
 irreducible part. Building the index is slower in exchange (22.7s at 80,000 chunks), a
 one-time cost traded against every query.
 
+Ingest is dominated by embedding, not by I/O or indexing — on 497 articles the split is
+read 0.1%, chunk 11.2%, **embed 86.6%**, index 2.0%. Parallelising the ZIM walk across
+processes is therefore capped at about 11% and would contend for the cores the encoder is
+already using; the throughput ceiling is the embedding model itself, at ~340 chunks/s here.
+
 A collection is three files, and the chunk text is stored once:
 
 ```
-<name>.faiss_flat.index    vectors
 <name>.chunks              chunk text and metadata, shared by both indexes
 <name>.bm25                postings, document lengths and IDF
+<name>.faiss_flat.index    vectors — written last, and what readers gate on
 ```
 
 Both indexes read `<name>.chunks` through a process-wide cache, so the corpus is held once
 in memory as well as once on disk — 39.4MB total for the 10,399-chunk corpus, down from 51.0MB.
+
+### Durability
+
+Index files are written to a temporary file and then moved into place, so a reader sees
+either the old index or the new one, never half of either. Writing in place instead —
+which truncates the destination before refilling it — produced **34,704 torn reads out of
+34,709** in a few seconds of concurrent access; after the change, 0. A server answering
+queries while an ingest runs sits squarely in that window.
+
+The chunk store is written before the vector index, because `index_exists` gates on the
+vector index: a crash part-way leaves a store with no index beside it, which reads as
+"not built", rather than an index promising chunks that were never written.
+
+An ingest holds an advisory lock on the collection, so two builds refuse to interleave
+rather than producing a vector index and a keyword index that disagree about what chunk 7
+is. A lock left behind by a process that died is detected and broken, so a crash needs no
+manual cleanup.
+
+No index file contains a pickle. An index is derived from a ZIM someone downloaded, and
+`pickle.load` on such a file executes whatever it contains; chunk text is stored as a UTF-8
+blob plus an offsets array, postings as flat numpy arrays, metadata as JSON, all read with
+`allow_pickle=False`.
+
+**On merging collections.** `run_multi_ingest` merges every ZIM into one database. Measured
+on real corpora — 153 chunks of this project's documentation, alone and then merged into
+10,399 chunks of Python documentation — the merge costs the smaller corpus **2.5% recall@5
+and 1.7% precision@1**. Worth knowing, not worth one index per collection.
 
 ### Abstention — knowing when not to answer
 

@@ -5,15 +5,20 @@ BM25+ adds a lower-bound term to BM25, so it is the shared postings index (see
 api.bm25) with a non-zero delta rather than a separate scoring implementation.
 """
 
+import json
 import os
-import pickle
 from typing import Dict, List, Tuple
 
+import numpy as np
+
 from api.bm25 import PostingsBM25
+from api.durability import atomic_write
 from api.chunk_store import load_shared
 from api.search_backends.base import KeywordSearchBackend
 
-INDEX_FORMAT_VERSION = 3
+INDEX_FORMAT_VERSION = 4
+
+_MAGIC = b"TSBM25\x00\x00"
 DELTA = 1.0
 
 
@@ -52,22 +57,39 @@ class BM25PlusBackend(KeywordSearchBackend):
 
     def save(self, path: str) -> None:
         """Persist the postings to {path}.bm25plus; text lives in {path}.chunks."""
-        with open(f"{path}.bm25plus", "wb") as f:
-            pickle.dump(
-                {"index": self._index.to_dict(), "version": INDEX_FORMAT_VERSION}, f
-            )
+        payload = self._index.to_arrays()
+        payload["meta"] = np.frombuffer(
+            json.dumps(
+                {"version": INDEX_FORMAT_VERSION, "variant": getattr(self, "variant", None)}
+            ).encode("utf-8"),
+            dtype=np.uint8,
+        )
+        with atomic_write(f"{path}.bm25plus", "wb") as f:
+            f.write(_MAGIC)
+            np.savez(f, **payload)
 
     def load(self, path: str) -> None:
+        """Load the postings, and attach the shared chunk store."""
         bm25plus_path = f"{path}.bm25plus"
         if not os.path.exists(bm25plus_path):
-            raise FileNotFoundError(f"BM25+ index not found: {bm25plus_path}")
-        with open(bm25plus_path, "rb") as f:
-            data = pickle.load(f)
-        if data.get("version") != INDEX_FORMAT_VERSION:
-            raise ValueError(
-                f"BM25+ index '{bm25plus_path}' was built by an older version "
-                f"(format {data.get('version', 1)}, expected {INDEX_FORMAT_VERSION}). "
-                "Re-ingest the collection."
-            )
-        self._index = PostingsBM25.from_dict(data["index"])
+            raise FileNotFoundError(f"Keyword index not found: {bm25plus_path}")
+
+        with open(bm25plus_path, "rb") as handle:
+            if handle.read(len(_MAGIC)) != _MAGIC:
+                raise ValueError(
+                    f"'{bm25plus_path}' predates index format {INDEX_FORMAT_VERSION}. "
+                    "Re-ingest the collection."
+                )
+            # allow_pickle stays False: this file is derived from a downloaded ZIM.
+            with np.load(handle, allow_pickle=False) as data:
+                meta = json.loads(data["meta"].tobytes().decode("utf-8"))
+                if meta.get("version") != INDEX_FORMAT_VERSION:
+                    raise ValueError(
+                        f"'{bm25plus_path}' has index format {meta.get('version')}, "
+                        f"expected {INDEX_FORMAT_VERSION}. Re-ingest the collection."
+                    )
+                self._index = PostingsBM25.from_arrays(data)
+
+        # Chunk text comes from the store the vector index also reads, so the
+        # corpus is held once in this process rather than once per index.
         self._texts = load_shared(path).texts

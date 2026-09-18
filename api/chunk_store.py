@@ -9,14 +9,24 @@ Sharing is by object, not just by file — ``load_shared`` returns the same
 instance to every caller reading the same path in a process, so the text exists
 once in memory as well as once on disk. The cache is keyed on the file's
 identity and mtime, so a re-ingest is picked up rather than served stale.
+
+The format holds no pickles. An index file is derived from a ZIM someone
+downloaded, and ``pickle.load`` on such a file executes whatever it contains;
+text is stored as one UTF-8 blob plus an offsets array, metadata as JSON.
 """
 
+import json
 import os
-import pickle
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
+
+from api.durability import atomic_write
+
 STORE_SUFFIX = ".chunks"
-STORE_FORMAT_VERSION = 1
+STORE_FORMAT_VERSION = 2
+
+_MAGIC = b"TSCHUNK\x00"
 
 
 class ChunkStore:
@@ -33,30 +43,58 @@ class ChunkStore:
     def __len__(self) -> int:
         return len(self.texts)
 
+    # ---- persistence ----------------------------------------------------
+
     def save(self, path: str) -> None:
-        with open(f"{path}{STORE_SUFFIX}", "wb") as handle:
-            pickle.dump(
-                {
-                    "texts": self.texts,
-                    "metadata": self.metadata,
-                    "version": STORE_FORMAT_VERSION,
-                },
-                handle,
-            )
+        """Write the store atomically, so a reader never sees it half-written."""
+        encoded = [t.encode("utf-8") for t in self.texts]
+        offsets = np.zeros(len(encoded) + 1, dtype=np.int64)
+        if encoded:
+            np.cumsum([len(b) for b in encoded], out=offsets[1:])
+
+        payload = {
+            "version": np.asarray([STORE_FORMAT_VERSION], dtype=np.int32),
+            "offsets": offsets,
+            "blob": np.frombuffer(b"".join(encoded), dtype=np.uint8),
+            "metadata": np.frombuffer(
+                json.dumps(self.metadata, ensure_ascii=False).encode("utf-8"),
+                dtype=np.uint8,
+            ),
+        }
+
+        with atomic_write(f"{path}{STORE_SUFFIX}", "wb") as handle:
+            handle.write(_MAGIC)
+            np.savez(handle, **payload)
 
     @classmethod
     def read(cls, path: str) -> "ChunkStore":
         store_path = f"{path}{STORE_SUFFIX}"
         if not os.path.exists(store_path):
             raise FileNotFoundError(f"Chunk store not found: {store_path}")
+
         with open(store_path, "rb") as handle:
-            data = pickle.load(handle)
-        if data.get("version") != STORE_FORMAT_VERSION:
-            raise ValueError(
-                f"Chunk store '{store_path}' has format {data.get('version')}, "
-                f"expected {STORE_FORMAT_VERSION}. Re-ingest the collection."
-            )
-        return cls(data["texts"], data.get("metadata") or [])
+            if handle.read(len(_MAGIC)) != _MAGIC:
+                raise ValueError(
+                    f"'{store_path}' is not a Tensor chunk store, or predates "
+                    f"format {STORE_FORMAT_VERSION}. Re-ingest the collection."
+                )
+            # allow_pickle stays False: this file came from a downloaded ZIM.
+            with np.load(handle, allow_pickle=False) as data:
+                version = int(data["version"][0])
+                if version != STORE_FORMAT_VERSION:
+                    raise ValueError(
+                        f"Chunk store '{store_path}' has format {version}, "
+                        f"expected {STORE_FORMAT_VERSION}. Re-ingest the collection."
+                    )
+                offsets = data["offsets"]
+                blob = data["blob"].tobytes()
+                metadata = json.loads(data["metadata"].tobytes().decode("utf-8") or "[]")
+
+        texts = [
+            blob[offsets[i] : offsets[i + 1]].decode("utf-8")
+            for i in range(len(offsets) - 1)
+        ]
+        return cls(texts, metadata)
 
 
 def store_exists(path: str) -> bool:

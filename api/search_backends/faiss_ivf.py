@@ -4,14 +4,15 @@ Approximate nearest neighbor search with O(n/k) complexity.
 Scales to 500K+ vectors with 50% speed improvement and 20% memory savings.
 """
 
+import json
 import os
-import pickle
 from typing import List, Tuple
 
 import faiss
 import numpy as np
 
 from api.chunk_store import ChunkStore, load_shared
+from api.durability import atomic_replace, atomic_write
 from api.search_backends.base import SemanticSearchBackend
 
 
@@ -171,10 +172,18 @@ class FAISSIVFBackend(SemanticSearchBackend):
         self._flush()
         if self.index is None:
             raise ValueError("Cannot save an IVF index with no vectors.")
-        faiss.write_index(self.index, f"{path}.faiss_ivf.index")
         self._store.save(path)
-        with open(f"{path}.faiss_ivf.pkl", "wb") as f:
-            pickle.dump(
+        self.save_vectors(path)
+
+    def save_vectors(self, path: str) -> None:
+        """Write only the vector index, leaving the chunk store alone."""
+        # faiss writes through its own I/O, so stage it and swap it in.
+        target = f"{path}.faiss_ivf.index"
+        staged = f"{target}.part"
+        faiss.write_index(self.index, staged)
+        atomic_replace(staged, target)
+        with atomic_write(f"{path}.faiss_ivf.json", "w") as f:
+            json.dump(
                 {
                     "n_clusters": self.n_clusters,
                     "is_trained": self._is_trained,
@@ -186,17 +195,17 @@ class FAISSIVFBackend(SemanticSearchBackend):
     def load(self, path: str) -> None:
         """Load index from disk."""
         index_path = f"{path}.faiss_ivf.index"
-        pkl_path = f"{path}.faiss_ivf.pkl"
+        params_path = f"{path}.faiss_ivf.json"
 
         if not os.path.exists(index_path):
             raise FileNotFoundError(f"FAISS IVF index not found: {index_path}")
-        if not os.path.exists(pkl_path):
-            raise FileNotFoundError(f"FAISS IVF metadata not found: {pkl_path}")
+        if not os.path.exists(params_path):
+            raise FileNotFoundError(f"FAISS IVF parameters not found: {params_path}")
 
         self.index = faiss.read_index(index_path)
         self._store = load_shared(path)
-        with open(pkl_path, "rb") as f:
-            data = pickle.load(f)
+        with open(params_path, "r") as f:
+            data = json.load(f)
         self.n_clusters = data.get("n_clusters", self.n_clusters)
         self._is_trained = data.get("is_trained", True)
         self.nprobe = data.get("nprobe", self.nprobe)

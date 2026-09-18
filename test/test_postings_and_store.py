@@ -135,8 +135,6 @@ def test_chunk_store_is_shared_by_object_not_just_by_file(tmp_path, isolated_con
 
 
 def test_keyword_index_no_longer_persists_the_corpus(tmp_path, isolated_config):
-    import pickle
-
     clear_cache()
     path = str(tmp_path / "db")
     db = VectorDB(dim=4)
@@ -146,9 +144,10 @@ def test_keyword_index_no_longer_persists_the_corpus(tmp_path, isolated_config):
     bm25.build(list(db.texts))
     bm25.save(path)
 
-    with open(f"{path}.bm25", "rb") as handle:
-        stored = pickle.load(handle)
-    assert "texts" not in stored, "chunk text is still duplicated into the BM25 index"
+    # The postings file should not contain the chunk text at all.
+    raw = open(f"{path}.bm25", "rb").read()
+    for chunk in CORPUS[:4]:
+        assert chunk.encode("utf-8") not in raw, "chunk text is duplicated into the BM25 index"
 
 
 def test_store_cache_notices_a_rebuild(tmp_path, isolated_config):
