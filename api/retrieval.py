@@ -36,6 +36,9 @@ def retrieval_settings() -> dict:
         "max_search_candidates": get_config_value("max_search_candidates"),
         "web_search_enabled": value("web_search_enabled", False),
         "web_search_results": value("web_search_results", 3),
+        "abstention_enabled": value("abstention_enabled", True),
+        "lexical_evidence_floor": value("lexical_evidence_floor", 1.0),
+        "semantic_confidence_floor": value("semantic_confidence_floor", 0.45),
     }
 
 
@@ -49,7 +52,8 @@ def retrieve(
     cache=None,
     settings: Optional[dict] = None,
     allow_web: bool = True,
-) -> Tuple[List[str], str]:
+    detailed: bool = False,
+):
     """
     Run the retrieval pipeline for one query.
 
@@ -65,10 +69,13 @@ def retrieve(
         settings:  Pre-resolved settings, to avoid re-reading config per query.
         allow_web: Set False to keep an offline evaluation offline.
 
+        detailed:  Return the full RetrievalOutcome instead of chunk text, so
+                   the caller can see scores and why the pipeline abstained.
+
     Returns:
-        (chunks, search_mode)
+        (chunks, search_mode), or (RetrievalOutcome, search_mode) when detailed.
     """
-    from api.hybrid_search import hybrid_search
+    from api.hybrid_search import search as hybrid_search
     from api.query_analyzer import QueryAnalyzer
 
     if settings is None:
@@ -78,7 +85,7 @@ def retrieve(
         query, settings["keyword_search_mode"], settings["semantic_search_mode"]
     )
 
-    if cache is not None:
+    if cache is not None and not detailed:
         cached = cache.get_search_result(query, search_mode, top_k)
         if cached is not None:
             return cached, search_mode
@@ -101,7 +108,7 @@ def retrieve(
     if max_candidates is None:
         max_candidates = top_k * 3
 
-    results = hybrid_search(
+    outcome = hybrid_search(
         query=query,
         query_embedding=query_embedding,
         vectordb=db,
@@ -113,7 +120,12 @@ def retrieve(
         web_results=web_results,
         query_expansion_enabled=settings["query_expansion_enabled"],
         query_expansion_type=settings["query_expansion_type"],
+        abstention_enabled=settings["abstention_enabled"],
+        lexical_evidence_floor=settings["lexical_evidence_floor"],
+        semantic_confidence_floor=settings["semantic_confidence_floor"],
     )
+
+    results = outcome.texts
 
     if settings["reranker_enabled"] and results:
         from api.reranker import rerank_results
@@ -126,7 +138,16 @@ def retrieve(
             reranker_model=settings["reranker_model"],
         )
 
+        # Reranking reorders text, so keep the candidates in step with it.
+        order = {text: rank for rank, text in enumerate(results)}
+        outcome.candidates = sorted(
+            (c for c in outcome.candidates if c.text in order),
+            key=lambda c: order[c.text],
+        )
+
     if cache is not None:
         cache.cache_search_result(query, search_mode, top_k, results)
 
+    if detailed:
+        return outcome, search_mode
     return results, search_mode

@@ -233,13 +233,17 @@ def test_prf_runs_its_own_first_pass_through_hybrid_search():
     bm25 = BM25Index()
     bm25.build(CORPUS)
     calls = []
-    original = bm25.search_indices
 
-    def spy(query, top_k):
-        calls.append((query, top_k))
-        return original(query, top_k)
+    # The feedback pass fetches indices; the main pass asks for scores.
+    for method in ("search_indices", "search_scored"):
+        original = getattr(bm25, method)
 
-    bm25.search_indices = spy
+        def spy(query, top_k, _original=original, _name=method):
+            calls.append((_name, query, top_k))
+            return _original(query, top_k)
+
+        setattr(bm25, method, spy)
+
     hybrid_search(
         query="asyncio",
         query_embedding=None,
@@ -251,9 +255,10 @@ def test_prf_runs_its_own_first_pass_through_hybrid_search():
         query_expansion_type="prf",
     )
 
-    assert len(calls) == 2, "PRF did not run a feedback pass"
-    assert calls[0][1] == 1, "the feedback pass should fetch the top-1 result"
-    assert calls[1][0] != "asyncio", "the second pass used the unexpanded query"
+    assert len(calls) == 2, f"PRF did not run a feedback pass: {calls}"
+    feedback, main_pass = calls
+    assert feedback[2] == 1, "the feedback pass should fetch the top-1 result"
+    assert main_pass[1] != "asyncio", "the second pass used the unexpanded query"
 
 
 # --------------------------------------------------------------------------
@@ -376,9 +381,9 @@ def test_chat_proxy_and_search_share_one_pipeline(isolated_config, monkeypatch):
     seen = []
     original = main._retrieve
 
-    def spy(query, top_k):
+    def spy(query, top_k, *args, **kwargs):
         seen.append((query, top_k))
-        return original(query, top_k)
+        return original(query, top_k, *args, **kwargs)
 
     monkeypatch.setattr(main, "_retrieve", spy)
     main._context_for_query("explain how backpressure works in asyncio")

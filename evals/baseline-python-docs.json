@@ -3,7 +3,7 @@
   "corpus_chunks": 10399,
   "families": {
     "nonsense": {
-      "abstention": 0.0,
+      "abstention": 1.0,
       "mrr": 0.0,
       "n": 15,
       "precision_at_1": 0.0,
@@ -32,30 +32,33 @@
     }
   },
   "latency_ms": {
-    "cold_start": 112.86,
-    "max": 53.43,
-    "p50": 12.91,
-    "p90": 35.46
+    "cold_start": 122.16,
+    "max": 64.12,
+    "p50": 13.28,
+    "p90": 35.04
   },
   "sample": 60,
   "seed": 0,
   "settings": {
+    "abstention_enabled": true,
     "keyword_search_mode": "auto",
+    "lexical_evidence_floor": 1.0,
     "max_search_candidates": null,
     "query_expansion_enabled": false,
     "query_expansion_type": "none",
     "relevance_threshold": 0.0,
     "reranker_enabled": false,
     "reranker_model": "lightweight",
+    "semantic_confidence_floor": 0.45,
     "semantic_search_mode": "auto",
     "web_search_enabled": false,
     "web_search_results": 3
   },
   "stage_latency_ms": {
-    "bm25": 18.154,
-    "embed": 3.977,
-    "faiss": 0.217,
-    "fuse": 18.268
+    "bm25": 19.492,
+    "embed": 4.577,
+    "faiss": 0.219,
+    "fuse": 20.046
   },
   "top_k": 5
 }

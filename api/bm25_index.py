@@ -68,6 +68,34 @@ class BM25Index:
         scores = self._bm25.get_scores(tokens)
         return top_k_indices(scores, min(top_k, len(self.texts)))
 
+
+    def search_scored(self, query: str, top_k: int):
+        """Top-k (index, BM25 score) pairs, best first."""
+        if self._bm25 is None or not self.texts:
+            return []
+        tokens = tokenize(query)
+        if not tokens:
+            return []
+        scores = self._bm25.get_scores(tokens)
+        return [
+            (idx, float(scores[idx]))
+            for idx in top_k_indices(scores, min(top_k, len(self.texts)))
+        ]
+
+    def term_evidence(self, query: str) -> dict:
+        """
+        IDF of each query term that exists in the corpus at all.
+
+        What separates a real question from nonsense is whether its words are
+        in the corpus, not how the scores are spread — margin and ratio tests
+        invert on real data. Terms absent from the vocabulary are simply
+        missing from this mapping, so summed evidence is zero for gibberish.
+        """
+        if self._bm25 is None:
+            return {}
+        idf = getattr(self._bm25, "idf", {}) or {}
+        return {t: float(idf[t]) for t in set(tokenize(query)) if t in idf and idf[t] > 0}
+
     def get_texts(self, indices: List[int]) -> List[str]:
         """Return the text chunks at the given indices."""
         return [self.texts[i] for i in indices if i < len(self.texts)]

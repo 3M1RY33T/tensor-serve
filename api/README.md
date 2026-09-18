@@ -319,6 +319,9 @@ curl -X POST http://localhost:8000/config/search-profiles/manual \
 | Setting | Lightweight | Balanced | Production |
 |---------|-------------|----------|------------|
 | `keyword_backend` | bm25_okapi | bm25_okapi | bm25_plus |
+| `abstention_enabled` | true | true | true |
+| `lexical_evidence_floor` | 1.0 | 1.0 | 1.0 |
+| `semantic_confidence_floor` | 0.45 | 0.45 | 0.45 |
 | `semantic_backend` | faiss_flat | faiss_flat | faiss_ivf |
 | `query_expansion_enabled` | false | false | true |
 | `query_expansion_type` | none | none | prf |

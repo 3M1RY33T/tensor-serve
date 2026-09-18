@@ -66,12 +66,19 @@ class BM25PlusBackend(KeywordSearchBackend):
 
     def search_indices(self, query: str, top_k: int) -> List[int]:
         """Return top-k chunk indices ranked by BM25+ relevance."""
-        if not self._texts or not self._postings:
+        scores = self._scores(query)
+        if scores is None:
             return []
+        return top_k_indices(scores, min(top_k, len(self._texts)))
+
+    def _scores(self, query: str):
+        """BM25+ score for every document, or None when the query has no terms."""
+        if not self._texts or not self._postings:
+            return None
 
         query_terms = [t for t in tokenize(query) if t in self._idf]
         if not query_terms:
-            return []
+            return None
 
         scores = np.zeros(len(self._texts), dtype="float64")
         doc_lengths = np.asarray(self._doc_lengths, dtype="float64")
@@ -93,7 +100,26 @@ class BM25PlusBackend(KeywordSearchBackend):
             # full so scores stay numerically comparable to the direct formula.
             scores += idf * self._delta
 
-        return top_k_indices(scores, min(top_k, len(self._texts)))
+        return scores
+
+
+    def search_scored(self, query: str, top_k: int):
+        """Top-k (index, BM25+ score) pairs, best first."""
+        scores = self._scores(query)
+        if scores is None:
+            return []
+        return [
+            (idx, float(scores[idx]))
+            for idx in top_k_indices(scores, min(top_k, len(self._texts)))
+        ]
+
+    def term_evidence(self, query: str) -> dict:
+        """IDF of each query term present in the corpus vocabulary."""
+        return {
+            t: float(self._idf[t])
+            for t in set(tokenize(query))
+            if t in self._idf and self._idf[t] > 0
+        }
 
     def get_texts(self, indices: List[int]) -> List[str]:
         """Retrieve text chunks at indices."""

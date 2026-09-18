@@ -179,6 +179,9 @@ class UpdateConfigRequest(BaseModel):
     ai_api_key_prefix: Optional[str] = None
     ai_extra_headers: Optional[dict] = None
     context_size: Optional[int] = None
+    abstention_enabled: Optional[bool] = None
+    lexical_evidence_floor: Optional[float] = None
+    semantic_confidence_floor: Optional[float] = None
     zim_source_folder: Optional[str] = None
 
 
@@ -269,6 +272,9 @@ def get_config():
         },
         "context_size": config.get("context_size", 3),
         "zim_source_folder": config.get("zim_source_folder"),
+        "abstention_enabled": config.get("abstention_enabled", True),
+        "lexical_evidence_floor": config.get("lexical_evidence_floor", 1.0),
+        "semantic_confidence_floor": config.get("semantic_confidence_floor", 0.45),
     }
 
 
@@ -1228,7 +1234,7 @@ def _retrieval_settings() -> dict:
     return retrieval_settings()
 
 
-def _retrieve(query: str, top_k: int) -> tuple:
+def _retrieve(query: str, top_k: int, detailed: bool = False) -> tuple:
     """Run the shared retrieval pipeline against the server's loaded indexes."""
     return retrieve(
         query,
@@ -1237,6 +1243,7 @@ def _retrieve(query: str, top_k: int) -> tuple:
         bm25=app_state.bm25,
         embedder=app_state.embedder,
         cache=query_cache,
+        detailed=detailed,
     )
 
 
@@ -1392,7 +1399,13 @@ def _last_user_text(messages: list) -> Optional[str]:
 
 
 def _context_for_query(query: str) -> list:
-    """Retrieve optional RAG context for an OpenAI-compatible chat request."""
+    """
+    Retrieve optional RAG context for an OpenAI-compatible chat request.
+
+    Returns Candidate objects rather than bare strings: each carries the chunk's
+    index, so source attribution is an array lookup instead of a scan over the
+    whole corpus to recover an index the search stage already had.
+    """
     if not app_state.db_loaded or app_state.db is None:
         return []
 
@@ -1412,8 +1425,8 @@ def _context_for_query(query: str) -> list:
         context_size = 3
 
     # Same pipeline /search runs — see _retrieve.
-    chunks, _mode = _retrieve(query, context_size)
-    return chunks
+    outcome, _mode = _retrieve(query, context_size, detailed=True)
+    return outcome.candidates
 
 
 
@@ -1422,7 +1435,7 @@ def _payload_with_context(payload: dict, context_chunks: list) -> dict:
     if not context_chunks:
         return payload
 
-    context_text = "\n\n".join([f"- {chunk}" for chunk in context_chunks])
+    context_text = "\n\n".join([f"- {_chunk_text(chunk)}" for chunk in context_chunks])
     system_message = {
         "role": "system",
         "content": f"Use the following context to answer questions:\n\n{context_text}",
@@ -1440,14 +1453,17 @@ def _pop_show_resources(payload: dict) -> bool:
     return bool(value)
 
 
+def _chunk_text(chunk) -> str:
+    """Text of a Candidate, or of a plain string from an older caller."""
+    return chunk if isinstance(chunk, str) else chunk.text
+
+
 def _chunk_index_lookup(db) -> dict:
     """
     Map chunk text back to its index, built once per loaded database.
 
-    This used to be rebuilt on every chat request, walking the whole corpus to
-    recover indices the search stage already had: 410ms per request at 200k
-    chunks. Cached against the identity of the loaded index, so it is rebuilt
-    when a different collection is loaded and not before.
+    Only needed for callers that hand over bare strings; the retrieval pipeline
+    now carries indices on each Candidate.
     """
     texts = getattr(db, "texts", [])
     token = (id(db), len(texts))
@@ -1466,11 +1482,14 @@ def _metadata_for_chunks(context_chunks: list) -> list:
     if db is None or not getattr(db, "metadata", None):
         return []
 
-    index_by_text = _chunk_index_lookup(db)
-
     metadata = []
     for chunk in context_chunks:
-        idx = index_by_text.get(chunk)
+        if isinstance(chunk, str):
+            # Legacy path: recover the index by text.
+            idx = _chunk_index_lookup(db).get(chunk)
+        else:
+            # The search stage already knew the index; web chunks have none.
+            idx = None if chunk.is_web else chunk.index
         if idx is None or idx >= len(db.metadata):
             continue
         metadata.append(db.metadata[idx] or {})

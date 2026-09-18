@@ -11,10 +11,10 @@ Combining `keyword search` and `semantic search`, Tensor helps produce more accu
 ## 1. How the AI pipeline works
 
 1. **Download** — ZIM files fetched from Kiwix and stored in the configured ZIM source folder (`zim_files/` by default)
-2. **Ingest** — Articles extracted, HTML stripped, split into 500-word overlapping chunks, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
+2. **Ingest** — Articles extracted, HTML stripped, split into overlapping chunks sized to the embedding model's real token limit, embedded with `sentence-transformers`, indexed in FAISS **and** BM25
 3. **Auto-load** — On server startup, the last active collection's FAISS and BM25 indexes are loaded automatically
 4. **Analyze** — Simple queries can skip retrieval; domain-specific queries use the query analyzer to choose the best search mode (`hybrid`, `faiss`, or `bm25`); time-sensitive queries optionally trigger web search
-5. **OpenAI-compatible proxy** — For `/v1/chat/completions`, the user message is embedded (or served from cache) → hybrid search retrieves top-k chunks (optionally merged with web results) → optional cross-encoder reranking improves result order → retrieved context is injected into the request before it is forwarded to the upstream AI server.
+5. **OpenAI-compatible proxy** — For `/v1/chat/completions`, the user message is embedded (or served from cache) → hybrid search retrieves top-k scored chunks (optionally merged with web results) → the abstention gate decides whether the corpus can answer at all → optional cross-encoder reranking improves result order → retrieved context is injected into the request before it is forwarded to the upstream AI server. When the gate does not pass, the request is forwarded with **no** injected context.
 
 ### Hybrid search (FAISS + BM25 + optional Web Search w/ Reciprocal Rank Fusion)
 
@@ -27,6 +27,33 @@ Search requests and OpenAI-compatible chat requests can run **up to three retrie
 | Requires setup | Automatic | Automatic | Optional; disabled by default |
 
 Results are merged with **Reciprocal Rank Fusion** (`score = Σ 1 / (60 + rank)`). Chunks that rank well in multiple result sets float to the top. The pipeline degrades gracefully — if one index is unavailable it is skipped.
+
+### Abstention — knowing when not to answer
+
+Retrieval returns scored candidates, not bare text, so the pipeline can tell the difference
+between *"here is the answer"* and *"this corpus cannot answer that"*. A question is answered
+when it is **lexically grounded** — its words exist in the corpus, weighted by IDF — **or**
+**semantically confident** — some chunk is close enough in embedding space. Either tier alone
+is enough; requiring both would reject exactly the questions embeddings were added for.
+
+Measured on 10,399 chunks of Python documentation, over questions whose correct answer is
+known by construction:
+
+| | top cosine (min / p10 / median) | summed IDF evidence (min / median) |
+|---|---|---|
+| real questions | 0.201 / 0.399 / 0.610 | 2.27 / 18.42 |
+| nonsense | 0.308 / 0.313 / 0.331 | 0.00 / 0.00 |
+
+Evidence separates the two cleanly, because gibberish shares no vocabulary with the corpus.
+Cosine does not — nonsense reaches 0.381 while a real question sits at 0.201 — so an absolute
+cosine floor alone would reject real questions in order to reject gibberish. Hence evidence
+first, cosine as a second chance.
+
+Turning the gate on moved abstention on nonsense from **0% to 100%** with recall@k, precision@1
+and MRR unchanged. Verify it on your own corpus with `tensor-serve eval`.
+
+Tune with `abstention_enabled`, `lexical_evidence_floor` and `semantic_confidence_floor`.
+Web search results bypass the gate, since they answer what the local corpus cannot.
 
 The query analyzer automatically selects the search strategy:
 

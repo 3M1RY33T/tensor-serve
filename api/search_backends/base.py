@@ -3,7 +3,7 @@ Abstract base classes for keyword and semantic search backends.
 """
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
 
 
 class KeywordSearchBackend(ABC):
@@ -18,6 +18,18 @@ class KeywordSearchBackend(ABC):
     def search_indices(self, query: str, top_k: int) -> List[int]:
         """Search and return top-k chunk indices ranked by relevance."""
         pass
+
+    def search_scored(self, query: str, top_k: int) -> List[Tuple[int, float]]:
+        """
+        Search and return top-k (index, score) pairs, best first.
+
+        Scores are the backend's own, unnormalised. Returning indices alone
+        discarded the only relevance signal the pipeline had, which is why no
+        threshold and no abstention were possible. Backends that do not
+        override this degrade to rank-derived scores.
+        """
+        indices = self.search_indices(query, top_k)
+        return [(idx, 1.0 / rank) for rank, idx in enumerate(indices, start=1)]
 
     @abstractmethod
     def save(self, path: str) -> None:
@@ -54,6 +66,18 @@ class SemanticSearchBackend(ABC):
     def search_indices(self, query_embedding: List[float], top_k: int = 5) -> List[int]:
         """Search and return top-k chunk indices."""
         pass
+
+    def search_scored(
+        self, query_embedding: List[float], top_k: int = 5
+    ) -> List[Tuple[int, float]]:
+        """
+        Search and return top-k (index, cosine similarity) pairs, best first.
+
+        Cosine is an absolute quantity, comparable across corpora, so it is
+        what an abstention gate can threshold on.
+        """
+        indices = self.search_indices(query_embedding, top_k)
+        return [(idx, 1.0 / rank) for rank, idx in enumerate(indices, start=1)]
 
     @abstractmethod
     def save(self, path: str) -> None:

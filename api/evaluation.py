@@ -216,20 +216,6 @@ def build_questions(
 # ---------------------------------------------------------------------- runner
 
 
-def _text_to_indices(texts: Sequence[str]) -> Dict[str, set]:
-    """
-    Map chunk text back to every index holding it.
-
-    Retrieval returns chunk *text* rather than indices, so scoring has to map
-    back. Duplicate chunks share an entry, and a hit counts if any of them is
-    gold. Phase 3 returns indices directly and this goes away.
-    """
-    lookup: Dict[str, set] = defaultdict(set)
-    for idx, text in enumerate(texts):
-        lookup[text].add(idx)
-    return lookup
-
-
 def run_eval(
     *,
     db,
@@ -258,14 +244,13 @@ def run_eval(
     if not questions:
         raise ValueError("Could not generate any evaluation questions from this corpus.")
 
-    lookup = _text_to_indices(texts)
     settings = retrieval_settings()
     results = {family: FamilyResult(family) for family in FAMILIES}
     latencies: List[float] = []
 
     for question in questions:
         started = time.perf_counter()
-        chunks, _mode = retrieve(
+        outcome, _mode = retrieve(
             question.query,
             top_k,
             db=db,
@@ -274,21 +259,24 @@ def run_eval(
             cache=None,
             settings=settings,
             allow_web=False,
+            detailed=True,
         )
         latencies.append((time.perf_counter() - started) * 1000)
 
         bucket = results[question.family]
         bucket.n += 1
 
-        if not chunks:
+        if not outcome.candidates:
             bucket.empty += 1
 
         if question.family == "nonsense":
             continue  # scored by abstention alone
 
+        # Candidates carry their own index, so scoring compares indices rather
+        # than matching chunk text back to a position in the corpus.
         rank_of_hit = None
-        for rank, chunk in enumerate(chunks, start=1):
-            if lookup.get(chunk, set()) & question.gold:
+        for rank, candidate in enumerate(outcome.candidates, start=1):
+            if candidate.index in question.gold:
                 rank_of_hit = rank
                 break
 

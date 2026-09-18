@@ -5,12 +5,29 @@ Standard exact L2 distance semantic search using FAISS IndexFlatL2.
 
 import os
 import pickle
-from typing import List
+from typing import List, Tuple
 
 import faiss
 import numpy as np
 
 from api.search_backends.base import SemanticSearchBackend
+
+
+def _unit(query_embedding):
+    """
+    Return the query as a unit vector, and whether it had a direction at all.
+
+    The cos = 1 - d/2 identity holds only when both vectors are unit length.
+    The index always stores normalised vectors, but a caller can pass anything:
+    an unnormalised query silently yields a wrong similarity, and a zero vector
+    yields 0.5 — squarely inside the band that passes a semantic gate.
+    """
+    vector = np.asarray([query_embedding], dtype="float32")
+    norm = float(np.linalg.norm(vector))
+    if norm == 0.0:
+        return vector, False
+    return vector / norm, True
+
 
 
 class FAISSFlatBackend(SemanticSearchBackend):
@@ -53,6 +70,28 @@ class FAISSFlatBackend(SemanticSearchBackend):
             np.array([query_embedding]).astype("float32"), top_k
         )
         return [int(idx) for idx in indices[0] if 0 <= idx < len(self._texts)]
+
+
+    def search_scored(
+        self, query_embedding: List[float], top_k: int = 5
+    ) -> List[Tuple[int, float]]:
+        """
+        Top-k (index, cosine similarity) pairs.
+
+        The index stores unit-length vectors (the embedding model ends in a
+        Normalize layer), and IndexFlatL2 reports *squared* L2 distance, so
+        ||a-b||^2 = 2 - 2cos gives cos = 1 - d/2 exactly.
+        """
+        query, has_direction = _unit(query_embedding)
+        if not has_direction:
+            return []
+
+        distances, indices = self.index.search(query, top_k)
+        return [
+            (int(idx), float(1.0 - dist / 2.0))
+            for dist, idx in zip(distances[0], indices[0])
+            if 0 <= idx < len(self._texts)
+        ]
 
     def save(self, path: str) -> None:
         """Save index to disk as {path}.faiss_flat."""

@@ -44,6 +44,10 @@ DEFAULT_CONFIG = {
     "max_search_candidates": None,  # None = use profile default
     "query_expansion_enabled": False,
     "query_expansion_type": "none",  # none | prf | entity
+    # Abstention. Floors are measured, not guessed — see api/hybrid_search.py.
+    "abstention_enabled": True,
+    "lexical_evidence_floor": 1.0,       # summed IDF of query terms in the corpus
+    "semantic_confidence_floor": 0.45,   # cosine of the closest chunk
 }
 
 
