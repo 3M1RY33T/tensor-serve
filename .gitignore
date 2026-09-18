@@ -14,3 +14,4 @@ config.json
 .tensor_config.key
 .DS_Store
 collections.json
+graphify-out/
